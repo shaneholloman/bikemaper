@@ -4,7 +4,7 @@ import path from 'path';
 import type { WorkerInput, WorkerOutput } from './worker';
 
 const WORKER_COUNT = 10;
-// const BATCH_SIZE = 10000;
+const BATCH_SIZE = 10_000;
 
 type CSVRow = {
   ride_id: string;
@@ -60,11 +60,10 @@ function updateStationMap(stationMap: Map<string, Station>, rows: CSVRow[]): voi
 }
 
 async function insertTripsInBatches(trips: Trip[]): Promise<void> {
-  await prisma.trip.createMany({data: trips})
-  // for (let i = 0; i < trips.length; i += BATCH_SIZE) {
-  //   const batch = trips.slice(i, i + BATCH_SIZE);
-  //   await prisma.trip.createMany({ data: batch });
-  // }
+  for (let i = 0; i < trips.length; i += BATCH_SIZE) {
+    const batch = trips.slice(i, i + BATCH_SIZE);
+    await prisma.trip.createMany({ data: batch });
+  }
 }
 
 type ProcessResult = {
