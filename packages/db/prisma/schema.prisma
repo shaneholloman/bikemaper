@@ -11,3 +11,27 @@ generator client {
 datasource db {
   provider = "sqlite"
 }
+
+model Trip {
+  id             String   @id
+  startStationId String
+  endStationId   String
+  startedAt      DateTime
+  endedAt        DateTime
+  rideableType   String
+  memberCasual   String
+  startLat       Float
+  startLng       Float
+  endLat         Float?
+  endLng         Float?
+
+  @@index([startedAt, endedAt])
+  @@index([startStationId, endStationId])
+}
+
+model Station {
+  id        String @id
+  name      String
+  latitude  Float
+  longitude Float
+}
