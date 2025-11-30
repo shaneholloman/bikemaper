@@ -2,4 +2,8 @@ data/
 zips/
 docs/
 
+# OS
 .DS_Store
+
+# Monorepo
+node_modules/

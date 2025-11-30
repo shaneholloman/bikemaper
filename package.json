@@ -1,0 +1,5 @@
+{
+  "name": "bikemap",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
