@@ -19,13 +19,15 @@ type PreparedTrip = {
   color: string;
   startTime: number; // ms offset from animation window start
   endTime: number;
+  startProgress: number; // 0-1, where on route the bike starts (for clipped trips)
+  endProgress: number; // 0-1, where on route the bike ends (for clipped trips)
   coordinates: [number, number][]; // [lng, lat] decoded from polyline
   cumulativeDistances: number[]; // cumulative distance at each coordinate
   totalDistance: number;
 };
 
 // Animation plays at 100x speed (e.g., 2 hours plays in ~72 seconds)
-const SPEEDUP = 200;
+const SPEEDUP = 150;
 
 // Haversine distance between two [lng, lat] points in meters
 function haversineDistance(
@@ -94,7 +96,8 @@ function prepareTrips(data: {
 
   return trips
     .filter((trip): trip is Trip & { routeGeometry: string } =>
-      trip.routeGeometry !== null
+      trip.routeGeometry !== null &&
+      trip.startStationId !== trip.endStationId
     )
     .map((trip) => {
       // Decode polyline6 - returns [lat, lng][], flip to [lng, lat]
@@ -115,14 +118,22 @@ function prepareTrips(data: {
       const tripDurationHours = (tripEndMs - tripStartMs) / (1000 * 60 * 60);
       const speedKmh = totalDistance / 1000 / tripDurationHours;
 
-      // Skip trips faster than 30 km/h (unrealistic for bikes)
-      if (speedKmh > 25 || speedKmh < 0) return null;
+      // Skip trips faster than 25 km/h (unrealistic for bikes)
+      if (speedKmh > 25 || speedKmh < 0.25) return null;
+
+      // Calculate where on the route the bike should be at window boundaries
+      // For trips that start before or end after the window
+      const tripDurationMs = tripEndMs - tripStartMs;
+      const startProgress = Math.max(0, (windowStartMs - tripStartMs) / tripDurationMs);
+      const endProgress = Math.min(1, (windowEndMs - tripEndMs + tripDurationMs) / tripDurationMs);
 
       return {
         id: trip.id,
         color: getColorFromId(trip.id),
         startTime: Math.max(0, tripStartMs - windowStartMs),
         endTime: Math.min(windowDuration, tripEndMs - windowStartMs),
+        startProgress,
+        endProgress,
         coordinates,
         cumulativeDistances,
         totalDistance,
@@ -186,13 +197,18 @@ function AnimationController(props: {
           continue;
         }
 
-        const progress =
+        // Calculate progress within the visible window (0-1)
+        const windowProgress =
           (simulationTime - trip.startTime) / (trip.endTime - trip.startTime);
+        // Map to actual route progress using startProgress and endProgress
+        const routeProgress =
+          trip.startProgress +
+          windowProgress * (trip.endProgress - trip.startProgress);
         const [lng, lat] = interpolateAlongRoute(
           trip.coordinates,
           trip.cumulativeDistances,
           trip.totalDistance,
-          progress
+          routeProgress
         );
 
         features.push({
