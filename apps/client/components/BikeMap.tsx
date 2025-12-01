@@ -32,7 +32,10 @@ type PreparedTrip = {
 const SPEEDUP = 150;
 
 // Fade duration for start/end animations (in real time)
-const FADE_DURATION_MS = 1000; // 0.5s
+const FADE_DURATION_MS = 1000;
+
+// Color transition duration after fade-in (in real time)
+const TRANSITION_DURATION_MS = 700;
 
 function prepareTrips(data: {
   trips: Trip[];
@@ -77,13 +80,14 @@ function prepareTrips(data: {
       const startProgress = Math.max(0, (windowStartMs - tripStartMs) / tripDurationMs);
       const endProgress = Math.min(1, (windowEndMs - tripEndMs + tripDurationMs) / tripDurationMs);
 
-      // Convert fade duration to simulation time
+      // Convert durations to simulation time
       const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
+      const transitionDurationSim = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
 
       return {
         id: trip.id,
         color: getColorFromId(trip.id),
-        startTime: Math.max(0, tripStartMs - windowStartMs) - fadeDurationSim,
+        startTime: Math.max(0, tripStartMs - windowStartMs) - fadeDurationSim - transitionDurationSim,
         endTime: Math.min(windowDuration, tripEndMs - windowStartMs) + fadeDurationSim,
         startProgress,
         endProgress,
@@ -145,6 +149,7 @@ function AnimationController(props: {
       // Build features for active trips
       const features: GeoJSON.Feature[] = [];
       const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
+      const transitionDurationSim = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
 
       for (const trip of preparedTrips) {
         if (simulationTime < trip.startTime || simulationTime > trip.endTime) {
@@ -153,8 +158,7 @@ function AnimationController(props: {
 
         // Calculate phase boundaries
         const fadeInEnd = trip.startTime + fadeDurationSim;
-        const transitionInEnd = fadeInEnd + fadeDurationSim;
-        const transitionOutStart = trip.endTime - (2 * fadeDurationSim);
+        const transitionInEnd = fadeInEnd + transitionDurationSim;
         const fadeOutStart = trip.endTime - fadeDurationSim;
 
         // Determine phase and phase progress
@@ -166,10 +170,7 @@ function AnimationController(props: {
           phaseProgress = (simulationTime - trip.startTime) / fadeDurationSim;
         } else if (simulationTime < transitionInEnd) {
           phase = "transitioning-in";
-          phaseProgress = (simulationTime - fadeInEnd) / fadeDurationSim;
-        } else if (simulationTime > transitionOutStart && simulationTime <= fadeOutStart) {
-          phase = "transitioning-out";
-          phaseProgress = (simulationTime - transitionOutStart) / fadeDurationSim;
+          phaseProgress = (simulationTime - fadeInEnd) / transitionDurationSim;
         } else if (simulationTime > fadeOutStart) {
           phase = "fading-out";
           phaseProgress = (simulationTime - fadeOutStart) / fadeDurationSim;
@@ -342,17 +343,8 @@ export const BikeMap = () => {
                 1, ["get", "color"], // gray at end
               ],
 
-              ["==", ["get", "phase"], "transitioning-out"],
-              [
-                "interpolate",
-                ["linear"],
-                ["get", "phaseProgress"],
-                0, ["get", "color"], // gray at start
-                1, "#ef4444", // red at end
-              ],
-
               ["==", ["get", "phase"], "fading-out"],
-              "#ef4444", // red
+              "#ef4444", // red (instant)
 
               ["get", "color"], // moving = gray
             ],
