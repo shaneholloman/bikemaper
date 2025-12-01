@@ -20,25 +20,67 @@ type PreparedTrip = {
   startTime: number; // ms offset from animation window start
   endTime: number;
   coordinates: [number, number][]; // [lng, lat] decoded from polyline
+  cumulativeDistances: number[]; // cumulative distance at each coordinate
+  totalDistance: number;
 };
 
-// Time compression: 2 hours -> 45 seconds
-const ANIMATION_DURATION_MS = 150_000;
+// Animation plays at 100x speed (e.g., 2 hours plays in ~72 seconds)
+const SPEEDUP = 5;
+
+// Haversine distance between two [lng, lat] points in meters
+function haversineDistance(
+  [lng1, lat1]: [number, number],
+  [lng2, lat2]: [number, number]
+): number {
+  const R = 6371000; // Earth radius in meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function computeCumulativeDistances(coords: [number, number][]): number[] {
+  const distances = [0];
+  for (let i = 1; i < coords.length; i++) {
+    distances.push(distances[i - 1] + haversineDistance(coords[i - 1], coords[i]));
+  }
+  return distances;
+}
 
 function interpolateAlongRoute(
   coords: [number, number][],
+  cumulativeDistances: number[],
+  totalDistance: number,
   progress: number
 ): [number, number] {
-  const idx = progress * (coords.length - 1);
-  const i = Math.floor(idx);
-  const t = idx - i;
+  if (coords.length === 0) return [0, 0];
+  if (coords.length === 1 || totalDistance === 0) return coords[0];
 
-  if (i >= coords.length - 1) {
-    return coords[coords.length - 1];
+  const targetDistance = progress * totalDistance;
+
+  // Binary search for the segment containing targetDistance
+  let lo = 0;
+  let hi = cumulativeDistances.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cumulativeDistances[mid] < targetDistance) lo = mid + 1;
+    else hi = mid;
   }
 
-  const [lng1, lat1] = coords[i];
-  const [lng2, lat2] = coords[i + 1];
+  const segmentIndex = Math.max(0, lo - 1);
+  const segmentStart = cumulativeDistances[segmentIndex];
+  const segmentEnd = cumulativeDistances[segmentIndex + 1] ?? segmentStart;
+  const segmentLength = segmentEnd - segmentStart;
+
+  const t = segmentLength > 0 ? (targetDistance - segmentStart) / segmentLength : 0;
+
+  const [lng1, lat1] = coords[segmentIndex];
+  const [lng2, lat2] = coords[segmentIndex + 1] ?? coords[segmentIndex];
+
   return [lng1 + (lng2 - lng1) * t, lat1 + (lat2 - lat1) * t];
 }
 
@@ -61,6 +103,10 @@ function prepareTrips(data: {
         ([lat, lng]) => [lng, lat] as [number, number]
       );
 
+      // Compute cumulative distances for uniform speed interpolation
+      const cumulativeDistances = computeCumulativeDistances(coordinates);
+      const totalDistance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
+
       // Normalize times relative to window start (0 to windowDuration)
       const tripStartMs = new Date(trip.startedAt).getTime();
       const tripEndMs = new Date(trip.endedAt).getTime();
@@ -71,6 +117,8 @@ function prepareTrips(data: {
         startTime: Math.max(0, tripStartMs - windowStartMs),
         endTime: Math.min(windowDuration, tripEndMs - windowStartMs),
         coordinates,
+        cumulativeDistances,
+        totalDistance,
       };
     });
 }
@@ -83,8 +131,9 @@ const EMPTY_GEOJSON: GeoJSON.FeatureCollection = {
 function AnimationController(props: {
   preparedTrips: PreparedTrip[];
   windowDurationMs: number;
+  animationDurationMs: number;
 }) {
-  const { preparedTrips, windowDurationMs } = props;
+  const { preparedTrips, windowDurationMs, animationDurationMs } = props;
   const { current: mapRef } = useMap();
   const [animState, setAnimState] = useState<AnimationState>("idle");
 
@@ -93,8 +142,11 @@ function AnimationController(props: {
     startTimestamp: number | null;
   }>({ rafId: null, startTimestamp: null });
 
-  const animate = useCallback(
-    (timestamp: number) => {
+  const animateFnRef = useRef<((timestamp: number) => void) | null>(null);
+
+  // Store animate function in ref to avoid circular dependency
+  useEffect(() => {
+    animateFnRef.current = (timestamp: number) => {
       const map = mapRef?.getMap();
       if (!map) return;
 
@@ -104,9 +156,9 @@ function AnimationController(props: {
       }
 
       const elapsedReal = timestamp - ref.startTimestamp;
-      // Map real time to simulation time
+      // Map real time to simulation time using ratio
       const simulationTime =
-        (elapsedReal / ANIMATION_DURATION_MS) * windowDurationMs;
+        (elapsedReal / animationDurationMs) * windowDurationMs;
 
       // Check if animation finished
       if (simulationTime >= windowDurationMs) {
@@ -128,7 +180,12 @@ function AnimationController(props: {
 
         const progress =
           (simulationTime - trip.startTime) / (trip.endTime - trip.startTime);
-        const [lng, lat] = interpolateAlongRoute(trip.coordinates, progress);
+        const [lng, lat] = interpolateAlongRoute(
+          trip.coordinates,
+          trip.cumulativeDistances,
+          trip.totalDistance,
+          progress
+        );
 
         features.push({
           type: "Feature",
@@ -143,16 +200,17 @@ function AnimationController(props: {
         source.setData({ type: "FeatureCollection", features });
       }
 
-      ref.rafId = requestAnimationFrame(animate);
-    },
-    [mapRef, preparedTrips, windowDurationMs]
-  );
+      ref.rafId = requestAnimationFrame((ts) => animateFnRef.current?.(ts));
+    };
+  }, [mapRef, preparedTrips, windowDurationMs, animationDurationMs]);
 
   const play = useCallback(() => {
     animationRef.current.startTimestamp = null;
     setAnimState("playing");
-    animationRef.current.rafId = requestAnimationFrame(animate);
-  }, [animate]);
+    animationRef.current.rafId = requestAnimationFrame((ts) =>
+      animateFnRef.current?.(ts)
+    );
+  }, []);
 
   const replay = useCallback(() => {
     if (animationRef.current.rafId) {
@@ -163,9 +221,10 @@ function AnimationController(props: {
 
   // Cleanup on unmount
   useEffect(() => {
+    const ref = animationRef.current;
     return () => {
-      if (animationRef.current.rafId) {
-        cancelAnimationFrame(animationRef.current.rafId);
+      if (ref.rafId) {
+        cancelAnimationFrame(ref.rafId);
       }
     };
   }, []);
@@ -206,8 +265,8 @@ export const BikeMap = () => {
       const data = await getActiveRides();
       console.log(`Found ${data.count} trips`);
 
-      const windowStartMs = new Date(data.startTime).getTime();
-      const windowEndMs = new Date(data.endTime).getTime();
+      const windowStartMs = data.startTime.getTime();
+      const windowEndMs = data.endTime.getTime();
 
       const prepared = prepareTrips({
         trips: data.trips,
@@ -254,6 +313,7 @@ export const BikeMap = () => {
         <AnimationController
           preparedTrips={preparedTrips}
           windowDurationMs={windowDurationMs}
+          animationDurationMs={windowDurationMs / SPEEDUP}
         />
       )}
     </Map>

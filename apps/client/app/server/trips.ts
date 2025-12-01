@@ -2,11 +2,20 @@
 
 import { prisma } from "@bikemap/db";
 
-// June 8, 2025 10:00 AM - 12:00 PM (peak commute)
-const START_TIME = new Date("2025-06-08T10:00:00.000Z");
-const END_TIME = new Date("2025-06-08T12:00:00.000Z");
+// Default: June 8, 2025 10:00 AM - 12:00 PM (peak commute)
+const DEFAULT_START_TIME = new Date("2025-06-08T10:00:00.000Z");
+const DEFAULT_END_TIME = new Date("2025-06-08T12:00:00.000Z");
 
-export async function getActiveRides() {
+export async function getActiveRides(params?: {
+  startTime?: Date;
+  endTime?: Date;
+}) {
+  const startTime = params?.startTime
+    ? params.startTime
+    : DEFAULT_START_TIME;
+  const endTime = params?.endTime
+    ? params.endTime
+    : DEFAULT_END_TIME;
   // Get trips with their routes via raw SQL JOIN
   const tripsWithRoutes = await prisma.$queryRaw<
     Array<{
@@ -45,14 +54,14 @@ export async function getActiveRides() {
     LEFT JOIN Route r
       ON r.startStationId = t.startStationId
       AND r.endStationId = t.endStationId
-    WHERE t.startedAt < ${END_TIME}
-      AND t.endedAt > ${START_TIME}
+    WHERE t.startedAt < ${endTime}
+      AND t.endedAt > ${startTime}
     ORDER BY t.startedAt ASC
   `;
 
   return {
-    startTime: START_TIME.toISOString(),
-    endTime: END_TIME.toISOString(),
+    startTime,
+    endTime,
     count: tripsWithRoutes.length,
     trips: tripsWithRoutes,
   };
