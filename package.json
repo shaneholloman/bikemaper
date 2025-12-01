@@ -1,5 +1,5 @@
 {
   "name": "bikemap",
   "private": true,
-  "workspaces": ["packages/*"]
+  "workspaces": ["packages/*", "apps/*"]
 }
