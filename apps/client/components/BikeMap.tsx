@@ -3,6 +3,9 @@
 import { getActiveRides } from "@/app/server/trips";
 import { getColorFromId } from "@/utils/map";
 import polyline from "@mapbox/polyline";
+import along from "@turf/along";
+import { lineString } from "@turf/helpers";
+import length from "@turf/length";
 import type { GeoJSONSource } from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,70 +24,12 @@ type PreparedTrip = {
   endTime: number;
   startProgress: number; // 0-1, where on route the bike starts (for clipped trips)
   endProgress: number; // 0-1, where on route the bike ends (for clipped trips)
-  coordinates: [number, number][]; // [lng, lat] decoded from polyline
-  cumulativeDistances: number[]; // cumulative distance at each coordinate
-  totalDistance: number;
+  line: GeoJSON.Feature<GeoJSON.LineString>; // turf lineString for interpolation
+  totalDistance: number; // in meters
 };
 
-// Animation plays at 100x speed (e.g., 2 hours plays in ~72 seconds)
+// Animation plays at 150x speed (e.g., 2 hours plays in ~48 seconds)
 const SPEEDUP = 150;
-
-// Haversine distance between two [lng, lat] points in meters
-function haversineDistance(
-  [lng1, lat1]: [number, number],
-  [lng2, lat2]: [number, number]
-): number {
-  const R = 6371000; // Earth radius in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function computeCumulativeDistances(coords: [number, number][]): number[] {
-  const distances = [0];
-  for (let i = 1; i < coords.length; i++) {
-    distances.push(distances[i - 1] + haversineDistance(coords[i - 1], coords[i]));
-  }
-  return distances;
-}
-
-function interpolateAlongRoute(
-  coords: [number, number][],
-  cumulativeDistances: number[],
-  totalDistance: number,
-  progress: number
-): [number, number] {
-  if (coords.length === 0) return [0, 0];
-  if (coords.length === 1 || totalDistance === 0) return coords[0];
-
-  const targetDistance = progress * totalDistance;
-
-  // Binary search for the segment containing targetDistance
-  let lo = 0;
-  let hi = cumulativeDistances.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (cumulativeDistances[mid] < targetDistance) lo = mid + 1;
-    else hi = mid;
-  }
-
-  const segmentIndex = Math.max(0, lo - 1);
-  const segmentStart = cumulativeDistances[segmentIndex];
-  const segmentEnd = cumulativeDistances[segmentIndex + 1] ?? segmentStart;
-  const segmentLength = segmentEnd - segmentStart;
-
-  const t = segmentLength > 0 ? (targetDistance - segmentStart) / segmentLength : 0;
-
-  const [lng1, lat1] = coords[segmentIndex];
-  const [lng2, lat2] = coords[segmentIndex + 1] ?? coords[segmentIndex];
-
-  return [lng1 + (lng2 - lng1) * t, lat1 + (lat2 - lat1) * t];
-}
 
 function prepareTrips(data: {
   trips: Trip[];
@@ -106,9 +51,11 @@ function prepareTrips(data: {
         ([lat, lng]) => [lng, lat] as [number, number]
       );
 
-      // Compute cumulative distances for uniform speed interpolation
-      const cumulativeDistances = computeCumulativeDistances(coordinates);
-      const totalDistance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
+      // Create turf lineString and compute total distance
+      const line = lineString(coordinates);
+      const totalDistance = length(line, { units: "meters" });
+    
+
 
       // Normalize times relative to window start (0 to windowDuration)
       const tripStartMs = new Date(trip.startedAt).getTime();
@@ -134,8 +81,7 @@ function prepareTrips(data: {
         endTime: Math.min(windowDuration, tripEndMs - windowStartMs),
         startProgress,
         endProgress,
-        coordinates,
-        cumulativeDistances,
+        line,
         totalDistance,
       };
     })
@@ -204,16 +150,14 @@ function AnimationController(props: {
         const routeProgress =
           trip.startProgress +
           windowProgress * (trip.endProgress - trip.startProgress);
-        const [lng, lat] = interpolateAlongRoute(
-          trip.coordinates,
-          trip.cumulativeDistances,
-          trip.totalDistance,
-          routeProgress
-        );
+
+        // Use turf's along() to get point at distance along the line
+        const distanceAlongRoute = routeProgress * trip.totalDistance;
+        const point = along(trip.line, distanceAlongRoute, { units: "meters" });
 
         features.push({
           type: "Feature",
-          geometry: { type: "Point", coordinates: [lng, lat] },
+          geometry: point.geometry,
           properties: { id: trip.id, color: trip.color },
         });
       }
