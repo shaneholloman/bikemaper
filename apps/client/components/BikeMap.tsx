@@ -51,7 +51,7 @@ function interpolateAngle(from: number, to: number, factor: number): number {
   if (diff < -180) diff += 360;
 
   // Interpolate
-  let result = from + diff * factor;
+  const result = from + diff * factor;
   return ((result % 360) + 360) % 360;
 }
 
@@ -120,12 +120,6 @@ function prepareTrips(data: {
       const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
       const transitionDurationSim = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
 
-      // Calculate initial bearing from the start of the route
-      const startPoint = along(line, startProgress * totalDistance, { units: "meters" });
-      const lookAhead = Math.min(100, totalDistance - startProgress * totalDistance);
-      const nextPoint = along(line, startProgress * totalDistance + lookAhead, { units: "meters" });
-      const initialBearing = bearing(startPoint, nextPoint);
-
       return {
         id: trip.id,
         color: getColorFromBikeType(trip.rideableType),
@@ -135,7 +129,7 @@ function prepareTrips(data: {
         endProgress,
         line,
         totalDistance,
-        currentBearing: initialBearing,
+        currentBearing: 0, // Start pointing North (up), will rotate during fade-in
       };
     })
     .filter((trip): trip is PreparedTrip => trip !== null);
@@ -245,20 +239,24 @@ function AnimationController(props: {
         const point = along(trip.line, distanceAlongRoute, { units: "meters" });
 
         // Calculate bearing (direction) for icon rotation
+        // Look 100 meters ahead for smoother direction changes
+        const lookAheadDistance = Math.min(100, trip.totalDistance - distanceAlongRoute);
+        const nextDistance = distanceAlongRoute + lookAheadDistance;
+        const nextPoint = along(trip.line, nextDistance, { units: "meters" });
+        const targetBearing = bearing(point, nextPoint);
+
         let bikeBearing: number;
 
-        if (phase === "fading-out") {
+        if (phase === "fading-in") {
+          // During fade-in, rotate from 0° to target bearing based on fade progress
+          bikeBearing = interpolateAngle(0, targetBearing, phaseProgress);
+          trip.currentBearing = bikeBearing; // Update so transition phase starts correctly
+        } else if (phase === "fading-out") {
           // Lock bearing during fade-out (keep final travel direction)
           bikeBearing = trip.currentBearing;
         } else {
-          // Look 100 meters ahead for smoother direction changes
-          const lookAheadDistance = Math.min(100, trip.totalDistance - distanceAlongRoute);
-          const nextDistance = distanceAlongRoute + lookAheadDistance;
-          const nextPoint = along(trip.line, nextDistance, { units: "meters" });
-          const newBearing = bearing(point, nextPoint);
-
-          // Smooth bearing changes: 30% new bearing, 70% old bearing
-          bikeBearing = interpolateAngle(trip.currentBearing, newBearing, 0.3);
+          // Smooth bearing changes during movement: 30% new bearing, 70% old bearing
+          bikeBearing = interpolateAngle(trip.currentBearing, targetBearing, 0.3);
           trip.currentBearing = bikeBearing; // Update for next frame
         }
 
@@ -413,7 +411,7 @@ export const BikeMap = () => {
           type="symbol"
           layout={{
             "icon-image": "caret",
-            "icon-size": 0.5,
+            "icon-size": 0.45,
             "icon-rotate": ["get", "bearing"],
             "icon-rotation-alignment": "map",
             "icon-allow-overlap": true,
