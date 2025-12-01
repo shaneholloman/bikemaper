@@ -31,6 +31,9 @@ type PreparedTrip = {
 // Animation plays at 150x speed (e.g., 2 hours plays in ~48 seconds)
 const SPEEDUP = 150;
 
+// Fade duration for start/end animations (in real time)
+const FADE_DURATION_MS = 1000; // 0.5s
+
 function prepareTrips(data: {
   trips: Trip[];
   windowStartMs: number;
@@ -74,11 +77,14 @@ function prepareTrips(data: {
       const startProgress = Math.max(0, (windowStartMs - tripStartMs) / tripDurationMs);
       const endProgress = Math.min(1, (windowEndMs - tripEndMs + tripDurationMs) / tripDurationMs);
 
+      // Convert fade duration to simulation time
+      const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
+
       return {
         id: trip.id,
         color: getColorFromId(trip.id),
-        startTime: Math.max(0, tripStartMs - windowStartMs),
-        endTime: Math.min(windowDuration, tripEndMs - windowStartMs),
+        startTime: Math.max(0, tripStartMs - windowStartMs) - fadeDurationSim,
+        endTime: Math.min(windowDuration, tripEndMs - windowStartMs) + fadeDurationSim,
         startProgress,
         endProgress,
         line,
@@ -138,18 +144,46 @@ function AnimationController(props: {
 
       // Build features for active trips
       const features: GeoJSON.Feature[] = [];
+      const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
+
       for (const trip of preparedTrips) {
         if (simulationTime < trip.startTime || simulationTime > trip.endTime) {
           continue;
         }
 
-        // Calculate progress within the visible window (0-1)
-        const windowProgress =
-          (simulationTime - trip.startTime) / (trip.endTime - trip.startTime);
-        // Map to actual route progress using startProgress and endProgress
-        const routeProgress =
-          trip.startProgress +
-          windowProgress * (trip.endProgress - trip.startProgress);
+        // Calculate fade boundaries (actual trip boundaries + fade padding)
+        const fadeInEnd = trip.startTime + fadeDurationSim;
+        const fadeOutStart = trip.endTime - fadeDurationSim;
+
+        // Determine phase and phase progress
+        let phase: string;
+        let phaseProgress: number;
+
+        if (simulationTime < fadeInEnd) {
+          phase = "fading-in";
+          phaseProgress = (simulationTime - trip.startTime) / fadeDurationSim;
+        } else if (simulationTime > fadeOutStart) {
+          phase = "fading-out";
+          phaseProgress = (simulationTime - fadeOutStart) / fadeDurationSim;
+        } else {
+          phase = "moving";
+          phaseProgress = 1;
+        }
+
+        // Calculate position based on phase
+        let routeProgress: number;
+        if (phase === "fading-in") {
+          routeProgress = trip.startProgress; // Stationary at start
+        } else if (phase === "fading-out") {
+          routeProgress = trip.endProgress; // Stationary at end
+        } else {
+          // Normal interpolation during moving phase
+          const movingDuration = fadeOutStart - fadeInEnd;
+          const movingProgress = (simulationTime - fadeInEnd) / movingDuration;
+          routeProgress =
+            trip.startProgress +
+            movingProgress * (trip.endProgress - trip.startProgress);
+        }
 
         // Use turf's along() to get point at distance along the line
         const distanceAlongRoute = routeProgress * trip.totalDistance;
@@ -158,7 +192,12 @@ function AnimationController(props: {
         features.push({
           type: "Feature",
           geometry: point.geometry,
-          properties: { id: trip.id, color: trip.color },
+          properties: {
+            id: trip.id,
+            color: trip.color,
+            phase,
+            phaseProgress,
+          },
         });
       }
 
@@ -262,7 +301,7 @@ export const BikeMap = () => {
         latitude: 40.7,
         zoom: 14,
       }}
-      mapStyle="mapbox://styles/mapbox/streets-v9"
+      mapStyle="mapbox://styles/mapbox/dark-v11"
       style={{ width: "100%", height: "100%" }}
     >
       <Source id="riders" type="geojson" data={EMPTY_GEOJSON}>
@@ -271,8 +310,22 @@ export const BikeMap = () => {
           type="circle"
           paint={{
             "circle-radius": 5,
-            "circle-color": ["get", "color"],
-            "circle-opacity": 0.8,
+            "circle-opacity": [
+              "case",
+              ["==", ["get", "phase"], "fading-in"],
+              ["get", "phaseProgress"], // 0 → 1
+              ["==", ["get", "phase"], "fading-out"],
+              ["-", 1, ["get", "phaseProgress"]], // 1 → 0
+              1, // moving = full opacity
+            ],
+            "circle-color": [
+              "case",
+              ["==", ["get", "phase"], "fading-in"],
+              "#22c55e", // green (Tailwind green-500)
+              ["==", ["get", "phase"], "fading-out"],
+              "#ef4444", // red (Tailwind red-500)
+              ["get", "color"], // moving = original blue color
+            ],
           }}
         />
       </Source>
