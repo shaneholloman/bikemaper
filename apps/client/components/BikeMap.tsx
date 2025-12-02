@@ -3,8 +3,6 @@
 import { getActiveRides } from "@/app/server/trips";
 import { getColorFromBikeType } from "@/utils/map";
 import polyline from "@mapbox/polyline";
-import along from "@turf/along";
-import bearing from "@turf/bearing";
 import distance from "@turf/distance";
 import { lineString, point } from "@turf/helpers";
 import length from "@turf/length";
@@ -43,6 +41,10 @@ const TRANSITION_DURATION_MS = 700;
 
 // Trail length in meters
 const TRAIL_LENGTH_METERS = 200;
+
+// Pre-computed simulation durations (avoids recalculating each frame)
+const FADE_DURATION_SIM = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
+const TRANSITION_DURATION_SIM = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
 
 // Interpolate between two angles, handling 360°/0° wrapping
 function interpolateAngle(from: number, to: number, factor: number): number {
@@ -91,6 +93,28 @@ function binarySearchIndex(arr: number[], target: number): number {
     }
   }
   return low;
+}
+
+// Get interpolated point at exact distance along route (O(log n) instead of O(n))
+function getPointAtDistance(
+  coords: [number, number][],
+  cumDist: number[],
+  targetDist: number
+): [number, number] {
+  const idx = binarySearchIndex(cumDist, targetDist);
+  const segIdx = Math.max(0, idx - 1);
+
+  if (segIdx >= coords.length - 1) {
+    return coords[coords.length - 1] as [number, number];
+  }
+
+  const segStart = cumDist[segIdx];
+  const segEnd = cumDist[segIdx + 1];
+  const t = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
+
+  const p0 = coords[segIdx];
+  const p1 = coords[segIdx + 1];
+  return [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])];
 }
 
 function prepareTrips(data: {
@@ -145,15 +169,11 @@ function prepareTrips(data: {
       const startProgress = Math.max(0, (windowStartMs - tripStartMs) / tripDurationMs);
       const endProgress = Math.min(1, (windowEndMs - tripEndMs + tripDurationMs) / tripDurationMs);
 
-      // Convert durations to simulation time
-      const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
-      const transitionDurationSim = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
-
       return {
         id: trip.id,
         color: getColorFromBikeType(trip.rideableType),
-        startTime: Math.max(0, tripStartMs - windowStartMs) - fadeDurationSim - transitionDurationSim,
-        endTime: Math.min(windowDuration, tripEndMs - windowStartMs) + fadeDurationSim,
+        startTime: Math.max(0, tripStartMs - windowStartMs) - FADE_DURATION_SIM - TRANSITION_DURATION_SIM,
+        endTime: Math.min(windowDuration, tripEndMs - windowStartMs) + FADE_DURATION_SIM,
         startProgress,
         endProgress,
         line,
@@ -226,8 +246,6 @@ function AnimationController(props: {
       const features: GeoJSON.Feature[] = [];
       const trailFeaturesBlue: GeoJSON.Feature[] = [];
       const trailFeaturesGray: GeoJSON.Feature[] = [];
-      const fadeDurationSim = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
-      const transitionDurationSim = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
 
       for (const trip of preparedTrips) {
         if (simulationTime < trip.startTime || simulationTime > trip.endTime) {
@@ -235,9 +253,9 @@ function AnimationController(props: {
         }
 
         // Calculate phase boundaries
-        const fadeInEnd = trip.startTime + fadeDurationSim;
-        const transitionInEnd = fadeInEnd + transitionDurationSim;
-        const fadeOutStart = trip.endTime - fadeDurationSim;
+        const fadeInEnd = trip.startTime + FADE_DURATION_SIM;
+        const transitionInEnd = fadeInEnd + TRANSITION_DURATION_SIM;
+        const fadeOutStart = trip.endTime - FADE_DURATION_SIM;
 
         // Determine phase and phase progress
         let phase: string;
@@ -245,13 +263,13 @@ function AnimationController(props: {
 
         if (simulationTime < fadeInEnd) {
           phase = "fading-in";
-          phaseProgress = (simulationTime - trip.startTime) / fadeDurationSim;
+          phaseProgress = (simulationTime - trip.startTime) / FADE_DURATION_SIM;
         } else if (simulationTime < transitionInEnd) {
           phase = "transitioning-in";
-          phaseProgress = (simulationTime - fadeInEnd) / transitionDurationSim;
+          phaseProgress = (simulationTime - fadeInEnd) / TRANSITION_DURATION_SIM;
         } else if (simulationTime > fadeOutStart) {
           phase = "fading-out";
-          phaseProgress = (simulationTime - fadeOutStart) / fadeDurationSim;
+          phaseProgress = (simulationTime - fadeOutStart) / FADE_DURATION_SIM;
         } else {
           phase = "moving";
           phaseProgress = 1;
@@ -275,16 +293,21 @@ function AnimationController(props: {
             easedProgress * (trip.endProgress - trip.startProgress);
         }
 
-        // Use turf's along() to get point at distance along the line
+        // Get bike position using O(log n) binary search + interpolation
         const distanceAlongRoute = routeProgress * trip.totalDistance;
-        const point = along(trip.line, distanceAlongRoute, { units: "meters" });
+        const coords = trip.line.geometry.coordinates as [number, number][];
+        const cumDist = trip.cumulativeDistances;
+        const bikeCoord = getPointAtDistance(coords, cumDist, distanceAlongRoute);
 
-        // Calculate bearing (direction) for icon rotation
-        // Look 50 meters ahead for smoother direction changes
+        // Calculate bearing using look-ahead point (50m ahead)
         const lookAheadDistance = Math.min(50, trip.totalDistance - distanceAlongRoute);
         const nextDistance = distanceAlongRoute + lookAheadDistance;
-        const nextPoint = along(trip.line, nextDistance, { units: "meters" });
-        const targetBearing = bearing(point, nextPoint);
+        const nextCoord = getPointAtDistance(coords, cumDist, nextDistance);
+
+        // Inline bearing calculation (simple atan2 approximation for short distances)
+        const dx = nextCoord[0] - bikeCoord[0];
+        const dy = nextCoord[1] - bikeCoord[1];
+        const targetBearing = Math.atan2(dx, dy) * (180 / Math.PI);
 
         let bikeBearing: number;
 
@@ -307,11 +330,7 @@ function AnimationController(props: {
           const trailEnd = distanceAlongRoute;
 
           if (trailEnd - trailStart > 5) {
-            // Use binary search + interpolation for exact endpoints
-            const coords = trip.line.geometry.coordinates;
-            const cumDist = trip.cumulativeDistances;
-
-            // Find segment indices
+            // Find segment indices (reuse coords/cumDist from above)
             const startIdx = binarySearchIndex(cumDist, trailStart);
             const endIdx = binarySearchIndex(cumDist, trailEnd);
 
@@ -334,11 +353,10 @@ function AnimationController(props: {
 
             // Add middle coordinates
             for (let i = startIdx; i < endIdx && i < coords.length; i++) {
-              trailCoords.push(coords[i] as [number, number]);
+              trailCoords.push(coords[i]);
             }
 
-            // Interpolate end point (use bike's exact position)
-            const bikeCoord = point.geometry.coordinates as [number, number];
+            // Use bike's exact position as trail end
             trailCoords.push(bikeCoord);
 
             if (trailCoords.length >= 2) {
@@ -362,7 +380,10 @@ function AnimationController(props: {
 
         features.push({
           type: "Feature",
-          geometry: point.geometry,
+          geometry: {
+            type: "Point",
+            coordinates: bikeCoord,
+          },
           properties: {
             id: trip.id,
             color: trip.color,
