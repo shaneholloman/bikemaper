@@ -34,7 +34,7 @@ type DeckTrip = {
 
 // Animation config - all times in seconds
 const SPEEDUP = 100;
-const TRAIL_LENGTH_SECONDS = 30;
+const TRAIL_LENGTH_SECONDS = 45;
 
 // Fade/transition duration in real milliseconds (matches original)
 const FADE_DURATION_MS = 700;
@@ -49,7 +49,7 @@ const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
 const LOOKAHEAD_CHUNKS = 1;
 
 // Animation start time
-const WINDOW_START = new Date("2025-06-08T05:00:00.000Z"); // 1am EDT
+const WINDOW_START = new Date("2025-06-08T08:00:00.000Z"); // 4am UTC (midnight EDT)
 
 // Theme colors
 const THEME = {
