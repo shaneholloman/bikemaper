@@ -1,6 +1,7 @@
 "use client";
 
 import { getRidesStartingIn, getTripsForChunk } from "@/app/server/trips";
+import { DataFilterExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { IconLayer } from "@deck.gl/layers";
 import { DeckGL } from "@deck.gl/react";
@@ -164,6 +165,13 @@ const getBikeHeadColor = (d: DeckTrip): Color4 => {
 const ICON_MAPPING = {
   arrow: { x: 0, y: 0, width: 24, height: 24, anchorX: 12, anchorY: 12, mask: true },
 };
+
+// DataFilterExtension for GPU-based visibility filtering
+// filterSize: 2 means we filter on 2 values [visibleStartSeconds, visibleEndSeconds]
+const dataFilter = new DataFilterExtension({ filterSize: 2 });
+
+// Accessor for DataFilterExtension - returns [visibleStartSeconds, visibleEndSeconds]
+const getFilterValue = (d: DeckTrip): [number, number] => [d.visibleStartSeconds, d.visibleEndSeconds];
 
 // Format milliseconds timestamp to date + 12-hour time string (NYC timezone)
 const formatTime = (ms: number) =>
@@ -565,7 +573,7 @@ export const BikeMap = () => {
     const currentTrips = Array.from(tripMapRef.current.values());
     setActiveTrips(currentTrips);
     setTripCount(currentTrips.length);
-  }, [currentChunk, time, animState, loadUpcomingRides]);
+  }, [currentChunk, animState, loadUpcomingRides]);
 
   const play = useCallback(() => {
     setAnimState("playing");
@@ -649,13 +657,11 @@ export const BikeMap = () => {
     throw new Error("NEXT_PUBLIC_MAPBOX_TOKEN is not set");
   }
 
-  // Update all trip states in place, filter to visible ones
-  // Note: filter() creates a new array, but the trips themselves are reused (no object creation per trip)
-  const visibleTrips = useMemo(() => {
+  // Update all trip states in place - GPU handles visibility filtering via DataFilterExtension
+  useMemo(() => {
     for (const trip of activeTrips) {
       updateTripState(trip, time);
     }
-    return activeTrips.filter(t => t.isVisible);
   }, [activeTrips, time]);
 
   const layers = useMemo(
@@ -673,9 +679,9 @@ export const BikeMap = () => {
         currentTime: time,
         pickable: false,
       }),
-      new IconLayer<DeckTrip>({
+      new IconLayer({
         id: "bike-heads",
-        data: visibleTrips,
+        data: activeTrips,
         billboard: false,
         opacity: 0.8,
         getPosition: getBikeHeadPosition,
@@ -686,6 +692,10 @@ export const BikeMap = () => {
         iconAtlas: ARROW_SVG,
         iconMapping: ICON_MAPPING,
         pickable: false,
+        // GPU-based visibility filtering
+        extensions: [dataFilter],
+        getFilterValue,
+        filterRange: [[-Infinity, time], [time, Infinity]],
         updateTriggers: {
           getPosition: [time],
           getAngle: [time],
@@ -693,7 +703,7 @@ export const BikeMap = () => {
         },
       }),
     ],
-    [activeTrips, visibleTrips, time]
+    [activeTrips, time]
   );
 
   return (
