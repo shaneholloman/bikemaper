@@ -49,15 +49,13 @@ const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
 const LOOKAHEAD_CHUNKS = 1;
 
 // Animation start time
-const WINDOW_START = new Date("2025-06-08T08:00:00.000Z"); // 4am UTC (midnight EDT)
+const WINDOW_START = new Date("2025-06-08T16:00:00.000Z"); // 4am UTC (midnight EDT)
 
-// Theme colors
 const THEME = {
-  //   trailColor0: [160, 160, 160] as Color, // gray - classic bikes
-  trailColor0: [139, 92, 246] as Color, // violet - classic bikes
-  trailColor1: [96, 165, 250] as Color, // blue - electric bikes
-  fadeInColor: [34, 197, 94] as Color, // green #22c55e
-  fadeOutColor: [239, 68, 68] as Color, // red #ef4444
+  trailColor0: [187, 154, 247] as Color, // purple
+  trailColor1: [125, 207, 255] as Color, // sky blue
+  fadeInColor: [158, 206, 106] as Color, // soft green
+  fadeOutColor: [247, 118, 142] as Color, // pink
 };
 
 // Arrow icon for bike heads
@@ -140,7 +138,7 @@ function prepareTripsForDeck(data: {
       const speedKmh = totalDistance / 1000 / tripDurationHours;
 
       // Skip trips faster than 20 km/h or slower than 2 km/h
-      if (speedKmh > 20 || speedKmh < 2) return null;
+      if (speedKmh > 18 || speedKmh < 2) return null;
 
       // Convert to seconds from window start
       const tripStartSeconds = (tripStartMs - windowStartMs) / 1000;
