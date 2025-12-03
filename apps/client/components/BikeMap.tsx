@@ -446,6 +446,7 @@ export const BikeMap = () => {
     new IconLayer({
       id: "bike-heads",
       data: bikeHeads,
+      billboard: false,
       getPosition: (d) => d.position,
       getAngle: (d) => -d.bearing,
       getIcon: () => "arrow",
