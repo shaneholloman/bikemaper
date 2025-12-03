@@ -1,50 +1,57 @@
 "use client";
 
-import { getActiveRides } from "@/app/server/trips";
-import { getColorFromBikeType } from "@/utils/map";
+import { getRidesStartingIn, getTripsForChunk } from "@/app/server/trips";
+import { TripsLayer } from "@deck.gl/geo-layers";
+import { DeckGL } from "@deck.gl/react";
 import polyline from "@mapbox/polyline";
 import distance from "@turf/distance";
-import { lineString, point } from "@turf/helpers";
-import length from "@turf/length";
-import type { GeoJSONSource } from "mapbox-gl";
+import { point } from "@turf/helpers";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
-import Map, { Layer, Source, useMap } from "react-map-gl/mapbox";
+import { Map as MapboxMap } from "react-map-gl/mapbox";
+
+import type { Color, MapViewState } from "@deck.gl/core";
 
 // Infer types from server function
-type TripsResponse = Awaited<ReturnType<typeof getActiveRides>>;
-type Trip = TripsResponse["trips"][number];
+type ChunkResponse = Awaited<ReturnType<typeof getTripsForChunk>>;
+type Trip = ChunkResponse["trips"][number];
 
 type AnimationState = "idle" | "playing" | "finished";
 
-type PreparedTrip = {
+// DeckGL TripsLayer data format
+type DeckTrip = {
   id: string;
-  color: string;
-  startTime: number; // ms offset from animation window start
-  endTime: number;
-  startProgress: number; // 0-1, where on route the bike starts (for clipped trips)
-  endProgress: number; // 0-1, where on route the bike ends (for clipped trips)
-  line: GeoJSON.Feature<GeoJSON.LineString>; // turf lineString for interpolation
-  totalDistance: number; // in meters
-  cumulativeDistances: number[]; // Pre-computed cumulative distances for binary search
-  currentBearing: number; // Current bearing for smooth rotation (mutable)
+  path: [number, number][];
+  timestamps: number[]; // seconds from window start
+  vendor: number; // 0 = classic, 1 = electric
+  endTimeSeconds: number; // when trip ends (seconds from window start)
 };
 
-// Animation plays at 150x speed (e.g., 2 hours plays in ~48 seconds)
-const SPEEDUP = 150;
+// Animation config - all times in seconds
+const SPEEDUP = 600; // 10x real time
+const TRAIL_LENGTH_SECONDS = 60; // 1 minute of trail
 
-// Fade duration for start/end animations (in real time)
-const FADE_DURATION_MS = 700;
+// Chunking config
+const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
+const LOOKAHEAD_CHUNKS = 1;
 
-// Color transition duration after fade-in (in real time)
-const TRANSITION_DURATION_MS = 700;
+// Full animation window
+const WINDOW_START = new Date("2025-06-08T08:00:00.000Z"); // 4am EDT
+const WINDOW_END = new Date("2025-06-09T01:00:00.000Z"); // 9pm EDT
 
-// Trail length in meters
-const TRAIL_LENGTH_METERS = 200;
+// Theme colors
+const THEME = {
+  trailColor0: [160, 160, 160] as Color, // gray - classic bikes
+  trailColor1: [96, 165, 250] as Color, // blue - electric bikes
+};
 
-// Pre-computed simulation durations (avoids recalculating each frame)
-const FADE_DURATION_SIM = (FADE_DURATION_MS / 1000) * SPEEDUP * 1000;
-const TRANSITION_DURATION_SIM = (TRANSITION_DURATION_MS / 1000) * SPEEDUP * 1000;
+const INITIAL_VIEW_STATE: MapViewState = {
+  longitude: -74.0,
+  latitude: 40.7,
+  zoom: 13,
+  pitch: 45,
+  bearing: 0,
+};
 
 // Format milliseconds timestamp to date + 12-hour time string (NYC timezone)
 const formatTime = (ms: number) =>
@@ -53,94 +60,22 @@ const formatTime = (ms: number) =>
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    second: "2-digit",
     hour12: true,
     timeZone: "America/New_York",
   });
 
-// Interpolate between two angles, handling 360°/0° wrapping
-function interpolateAngle(from: number, to: number, factor: number): number {
-  // Normalize angles to 0-360
-  from = ((from % 360) + 360) % 360;
-  to = ((to % 360) + 360) % 360;
-
-  // Calculate shortest distance
-  let diff = to - from;
-  if (diff > 180) diff -= 360;
-  if (diff < -180) diff += 360;
-
-  // Interpolate
-  const result = from + diff * factor;
-  return ((result % 360) + 360) % 360;
-}
-
-// Ease-in at start, linear middle, ease-out at end
-function easeInOutEdges(t: number, edgePercent: number = 0.1): number {
-  const e = edgePercent;
-
-  if (t < e) {
-    // Ease-in: quadratic acceleration from 0 to linear speed
-    return (t * t) / (2 * e * (1 - e));
-  } else if (t > 1 - e) {
-    // Ease-out: quadratic deceleration from linear speed to 0
-    return 1 - ((1 - t) * (1 - t)) / (2 * e * (1 - e));
-  } else {
-    // Linear middle at constant speed
-    const positionAtE = e / (2 * (1 - e));
-    const slope = 1 / (1 - e);
-    return positionAtE + slope * (t - e);
-  }
-}
-
-// Binary search to find index where cumulative distance >= target
-function binarySearchIndex(arr: number[], target: number): number {
-  let low = 0;
-  let high = arr.length - 1;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (arr[mid] < target) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  return low;
-}
-
-// Get interpolated point at exact distance along route (O(log n) instead of O(n))
-function getPointAtDistance(
-  coords: [number, number][],
-  cumDist: number[],
-  targetDist: number
-): [number, number] {
-  const idx = binarySearchIndex(cumDist, targetDist);
-  const segIdx = Math.max(0, idx - 1);
-
-  if (segIdx >= coords.length - 1) {
-    return coords[coords.length - 1] as [number, number];
-  }
-
-  const segStart = cumDist[segIdx];
-  const segEnd = cumDist[segIdx + 1];
-  const t = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
-
-  const p0 = coords[segIdx];
-  const p1 = coords[segIdx + 1];
-  return [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])];
-}
-
-function prepareTrips(data: {
+// Prepare trips for deck.gl TripsLayer format with timestamps in seconds from window start
+function prepareTripsForDeck(data: {
   trips: Trip[];
   windowStartMs: number;
-  windowEndMs: number;
-}): PreparedTrip[] {
-  const { trips, windowStartMs, windowEndMs } = data;
-  const windowDuration = windowEndMs - windowStartMs;
+}): DeckTrip[] {
+  const { trips, windowStartMs } = data;
 
-  return trips
-    .filter((trip): trip is Trip & { routeGeometry: string } =>
-      trip.routeGeometry !== null &&
-      trip.startStationId !== trip.endStationId
+  const prepared = trips
+    .filter(
+      (trip): trip is Trip & { routeGeometry: string } =>
+        trip.routeGeometry !== null &&
+        trip.startStationId !== trip.endStationId
     )
     .map((trip) => {
       // Decode polyline6 - returns [lat, lng][], flip to [lng, lat]
@@ -149,11 +84,9 @@ function prepareTrips(data: {
         ([lat, lng]) => [lng, lat] as [number, number]
       );
 
-      // Create turf lineString and compute total distance
-      const line = lineString(coordinates);
-      const totalDistance = length(line, { units: "meters" });
+      if (coordinates.length < 2) return null;
 
-      // Pre-compute cumulative distances for efficient trail slicing
+      // Calculate cumulative distances for timestamp distribution
       const cumulativeDistances: number[] = [0];
       for (let i = 1; i < coordinates.length; i++) {
         const segmentDist = distance(
@@ -164,316 +97,290 @@ function prepareTrips(data: {
         cumulativeDistances.push(cumulativeDistances[i - 1] + segmentDist);
       }
 
-      // Normalize times relative to window start (0 to windowDuration)
-      const tripStartMs = new Date(trip.startedAt).getTime();
-      const tripEndMs = new Date(trip.endedAt).getTime();
+      const totalDistance = cumulativeDistances[cumulativeDistances.length - 1];
 
       // Calculate implied speed and filter unrealistic trips
+      const tripStartMs = new Date(trip.startedAt).getTime();
+      const tripEndMs = new Date(trip.endedAt).getTime();
       const tripDurationHours = (tripEndMs - tripStartMs) / (1000 * 60 * 60);
       const speedKmh = totalDistance / 1000 / tripDurationHours;
 
-      // Skip trips faster than 25 km/h (unrealistic for bikes)
+      // Skip trips faster than 20 km/h or slower than 2 km/h
       if (speedKmh > 20 || speedKmh < 2) return null;
 
-      // Calculate where on the route the bike should be at window boundaries
-      // For trips that start before or end after the window
-      const tripDurationMs = tripEndMs - tripStartMs;
-      const startProgress = Math.max(0, (windowStartMs - tripStartMs) / tripDurationMs);
-      const endProgress = Math.min(1, (windowEndMs - tripEndMs + tripDurationMs) / tripDurationMs);
+      // Convert to seconds from window start
+      const tripStartSeconds = (tripStartMs - windowStartMs) / 1000;
+      const tripEndSeconds = (tripEndMs - windowStartMs) / 1000;
+      const tripDurationSeconds = tripEndSeconds - tripStartSeconds;
+
+      // Generate timestamps for each coordinate based on distance fraction
+      const timestamps = cumulativeDistances.map((dist) => {
+        const fraction = totalDistance > 0 ? dist / totalDistance : 0;
+        return tripStartSeconds + fraction * tripDurationSeconds;
+      });
 
       return {
         id: trip.id,
-        color: getColorFromBikeType(trip.rideableType),
-        startTime: Math.max(0, tripStartMs - windowStartMs) - FADE_DURATION_SIM - TRANSITION_DURATION_SIM,
-        endTime: Math.min(windowDuration, tripEndMs - windowStartMs) + FADE_DURATION_SIM,
-        startProgress,
-        endProgress,
-        line,
-        totalDistance,
-        cumulativeDistances,
-        currentBearing: 0, // Start pointing North (up), will rotate during fade-in
+        path: coordinates,
+        timestamps,
+        vendor: trip.rideableType === "electric_bike" ? 1 : 0,
+        endTimeSeconds: tripEndSeconds,
       };
     })
-    .filter((trip): trip is PreparedTrip => trip !== null);
+    .filter((trip): trip is DeckTrip => trip !== null);
+
+  return prepared;
 }
 
-const EMPTY_GEOJSON: GeoJSON.FeatureCollection = {
-  type: "FeatureCollection",
-  features: [],
-};
+export const BikeMap = () => {
+  const windowStartMs = WINDOW_START.getTime();
+  const windowDurationSeconds = (WINDOW_END.getTime() - windowStartMs) / 1000;
 
-function AnimationController(props: {
-  preparedTrips: PreparedTrip[];
-  windowStartMs: number;
-  windowDurationMs: number;
-  animationDurationMs: number;
-}) {
-  const { preparedTrips, windowStartMs, windowDurationMs, animationDurationMs } = props;
-  const { current: mapRef } = useMap();
+  const [activeTrips, setActiveTrips] = useState<DeckTrip[]>([]);
+  const [tripCount, setTripCount] = useState(0);
+  const [time, setTime] = useState(0); // seconds from window start
   const [animState, setAnimState] = useState<AnimationState>("idle");
-  const clockRef = useRef<HTMLSpanElement>(null);
 
-  const animationRef = useRef<{
-    rafId: number | null;
-    startTimestamp: number | null;
-  }>({ rafId: null, startTimestamp: null });
+  const rafRef = useRef<number | null>(null);
+  const lastTimestampRef = useRef<number | null>(null);
+  const tripMapRef = useRef<Map<string, DeckTrip>>(new Map());
+  const loadingChunksRef = useRef<Set<number>>(new Set());
+  const loadedChunksRef = useRef<Set<number>>(new Set());
+  const lastChunkRef = useRef(-1);
 
-  const animateFnRef = useRef<((timestamp: number) => void) | null>(null);
+  // Convert seconds to real time (ms) for clock display
+  const secondsToRealTime = useCallback(
+    (seconds: number) => windowStartMs + seconds * 1000,
+    [windowStartMs]
+  );
 
-  // Store animate function in ref to avoid circular dependency
-  useEffect(() => {
-    animateFnRef.current = (timestamp: number) => {
-      const map = mapRef?.getMap();
-      if (!map) return;
+  // Get chunk index from simulation time (seconds)
+  const getChunkIndex = useCallback(
+    (timeSeconds: number) => Math.floor(timeSeconds / CHUNK_SIZE_SECONDS),
+    []
+  );
 
-      const ref = animationRef.current;
-      if (ref.startTimestamp === null) {
-        ref.startTimestamp = timestamp;
-      }
-
-      const elapsedReal = timestamp - ref.startTimestamp;
-      // Map real time to simulation time using ratio
-      const simulationTime =
-        (elapsedReal / animationDurationMs) * windowDurationMs;
-
-      // Update clock display
-      if (clockRef.current) {
-        clockRef.current.textContent = formatTime(windowStartMs + simulationTime);
-      }
-
-      // Check if animation finished
-      if (simulationTime >= windowDurationMs) {
-        setAnimState("finished");
-        // Set clock to end time
-        if (clockRef.current) {
-          clockRef.current.textContent = formatTime(windowStartMs + windowDurationMs);
-        }
-        const source = map.getSource("riders") as GeoJSONSource | undefined;
-        if (source) {
-          source.setData(EMPTY_GEOJSON);
-        }
-        // Clear trails
-        const trailSourceBlue = map.getSource("trails-blue") as
-          | GeoJSONSource
-          | undefined;
-        const trailSourceGray = map.getSource("trails-gray") as
-          | GeoJSONSource
-          | undefined;
-        trailSourceBlue?.setData(EMPTY_GEOJSON);
-        trailSourceGray?.setData(EMPTY_GEOJSON);
-        ref.rafId = null;
+  // Load rides starting in a specific chunk
+  const loadUpcomingRides = useCallback(
+    async (chunkIndex: number) => {
+      if (loadedChunksRef.current.has(chunkIndex) || loadingChunksRef.current.has(chunkIndex)) {
         return;
       }
 
-      // Build features for active trips
-      const features: GeoJSON.Feature[] = [];
-      const trailFeaturesBlue: GeoJSON.Feature[] = [];
-      const trailFeaturesGray: GeoJSON.Feature[] = [];
+      const totalChunks = Math.ceil(windowDurationSeconds / CHUNK_SIZE_SECONDS);
+      if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+        return;
+      }
 
-      for (const trip of preparedTrips) {
-        if (simulationTime < trip.startTime || simulationTime > trip.endTime) {
-          continue;
-        }
+      loadingChunksRef.current.add(chunkIndex);
+      console.log(`Loading rides starting in chunk ${chunkIndex}...`);
 
-        // Calculate phase boundaries
-        const fadeInEnd = trip.startTime + FADE_DURATION_SIM;
-        const transitionInEnd = fadeInEnd + TRANSITION_DURATION_SIM;
-        const fadeOutStart = trip.endTime - FADE_DURATION_SIM;
+      const from = new Date(windowStartMs + chunkIndex * CHUNK_SIZE_SECONDS * 1000);
+      const to = new Date(windowStartMs + (chunkIndex + 1) * CHUNK_SIZE_SECONDS * 1000);
 
-        // Determine phase and phase progress
-        let phase: string;
-        let phaseProgress: number;
-
-        if (simulationTime < fadeInEnd) {
-          phase = "fading-in";
-          phaseProgress = (simulationTime - trip.startTime) / FADE_DURATION_SIM;
-        } else if (simulationTime < transitionInEnd) {
-          phase = "transitioning-in";
-          phaseProgress = (simulationTime - fadeInEnd) / TRANSITION_DURATION_SIM;
-        } else if (simulationTime > fadeOutStart) {
-          phase = "fading-out";
-          phaseProgress = (simulationTime - fadeOutStart) / FADE_DURATION_SIM;
-        } else {
-          phase = "moving";
-          phaseProgress = 1;
-        }
-
-        // Calculate position based on phase
-        let routeProgress: number;
-        if (phase === "fading-in") {
-          routeProgress = trip.startProgress; // Stationary at start
-        } else if (phase === "fading-out") {
-          routeProgress = trip.endProgress; // Stationary at end
-        } else {
-          // Moving during transitioning-in, moving, and transitioning-out
-          const movingStart = fadeInEnd;
-          const movingEnd = fadeOutStart;
-          const movingDuration = movingEnd - movingStart;
-          const movingProgress = (simulationTime - movingStart) / movingDuration;
-          const easedProgress = easeInOutEdges(movingProgress);
-          routeProgress =
-            trip.startProgress +
-            easedProgress * (trip.endProgress - trip.startProgress);
-        }
-
-        // Get bike position using O(log n) binary search + interpolation
-        const distanceAlongRoute = routeProgress * trip.totalDistance;
-        const coords = trip.line.geometry.coordinates as [number, number][];
-        const cumDist = trip.cumulativeDistances;
-        const bikeCoord = getPointAtDistance(coords, cumDist, distanceAlongRoute);
-
-        // Calculate bearing using look-ahead point (50m ahead)
-        const lookAheadDistance = Math.min(50, trip.totalDistance - distanceAlongRoute);
-        const nextDistance = distanceAlongRoute + lookAheadDistance;
-        const nextCoord = getPointAtDistance(coords, cumDist, nextDistance);
-
-        // Inline bearing calculation (simple atan2 approximation for short distances)
-        const dx = nextCoord[0] - bikeCoord[0];
-        const dy = nextCoord[1] - bikeCoord[1];
-        const targetBearing = Math.atan2(dx, dy) * (180 / Math.PI);
-
-        let bikeBearing: number;
-
-        if (phase === "fading-in") {
-          // During fade-in, rotate from 0° to target bearing based on fade progress
-          bikeBearing = interpolateAngle(0, targetBearing, phaseProgress);
-          trip.currentBearing = bikeBearing; // Update so transition phase starts correctly
-        } else if (phase === "fading-out") {
-          // Lock bearing during fade-out (keep final travel direction)
-          bikeBearing = trip.currentBearing;
-        } else {
-          // Smooth bearing changes during movement: 30% new bearing, 70% old bearing
-          bikeBearing = interpolateAngle(trip.currentBearing, targetBearing, 0.3);
-          trip.currentBearing = bikeBearing; // Update for next frame
-        }
-
-        // Calculate trail segment (only when bike is moving)
-        if (phase !== "fading-in" && phase !== "fading-out") {
-          const trailStart = Math.max(0, distanceAlongRoute - TRAIL_LENGTH_METERS);
-          const trailEnd = distanceAlongRoute;
-
-          if (trailEnd - trailStart > 5) {
-            // Find segment indices (reuse coords/cumDist from above)
-            const startIdx = binarySearchIndex(cumDist, trailStart);
-            const endIdx = binarySearchIndex(cumDist, trailEnd);
-
-            // Build trail coordinates with interpolated endpoints
-            const trailCoords: [number, number][] = [];
-
-            // Interpolate start point
-            const startSegIdx = Math.max(0, startIdx - 1);
-            if (startSegIdx < coords.length - 1) {
-              const segStart = cumDist[startSegIdx];
-              const segEnd = cumDist[startSegIdx + 1];
-              const t = segEnd > segStart ? (trailStart - segStart) / (segEnd - segStart) : 0;
-              const p0 = coords[startSegIdx];
-              const p1 = coords[startSegIdx + 1];
-              trailCoords.push([
-                p0[0] + t * (p1[0] - p0[0]),
-                p0[1] + t * (p1[1] - p0[1]),
-              ]);
-            }
-
-            // Add middle coordinates
-            for (let i = startIdx; i < endIdx && i < coords.length; i++) {
-              trailCoords.push(coords[i]);
-            }
-
-            // Use bike's exact position as trail end
-            trailCoords.push(bikeCoord);
-
-            if (trailCoords.length >= 2) {
-              const trailFeature: GeoJSON.Feature = {
-                type: "Feature",
-                geometry: {
-                  type: "LineString",
-                  coordinates: trailCoords,
-                },
-                properties: { id: trip.id },
-              };
-
-              if (trip.color === "#60a5fa") {
-                trailFeaturesBlue.push(trailFeature);
-              } else {
-                trailFeaturesGray.push(trailFeature);
-              }
-            }
-          }
-        }
-
-        features.push({
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: bikeCoord,
-          },
-          properties: {
-            id: trip.id,
-            color: trip.color,
-            phase,
-            phaseProgress,
-            bearing: bikeBearing,
-          },
+      try {
+        const data = await getRidesStartingIn({ from, to });
+        const prepared = prepareTripsForDeck({
+          trips: data.trips,
+          windowStartMs,
         });
+
+        console.log(`Chunk ${chunkIndex}: ${prepared.length} new rides`);
+
+        // Add to ref (dedupes by ID)
+        for (const trip of prepared) {
+          tripMapRef.current.set(trip.id, trip);
+        }
+
+        loadedChunksRef.current.add(chunkIndex);
+      } finally {
+        loadingChunksRef.current.delete(chunkIndex);
       }
+    },
+    [windowStartMs, windowDurationSeconds]
+  );
 
-      // Update Mapbox sources directly - bypasses React
-      const source = map.getSource("riders") as GeoJSONSource | undefined;
-      if (source) {
-        source.setData({ type: "FeatureCollection", features });
+  // Initial load: rides active at t=0 plus rides starting in first chunk
+  const initialLoadDone = useRef(false);
+  useEffect(() => {
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+
+    const loadInitial = async () => {
+      console.log("Loading initial rides...");
+      // Get rides that overlap with t=0 (already in progress)
+      const data = await getTripsForChunk({
+        chunkStart: WINDOW_START,
+        chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
+      });
+      const prepared = prepareTripsForDeck({
+        trips: data.trips,
+        windowStartMs,
+      });
+      console.log(`Initial load: ${prepared.length} rides`);
+
+      for (const trip of prepared) {
+        tripMapRef.current.set(trip.id, trip);
       }
+      loadedChunksRef.current.add(0);
 
-      // Update trail sources
-      const trailSourceBlue = map.getSource("trails-blue") as
-        | GeoJSONSource
-        | undefined;
-      const trailSourceGray = map.getSource("trails-gray") as
-        | GeoJSONSource
-        | undefined;
-      trailSourceBlue?.setData({
-        type: "FeatureCollection",
-        features: trailFeaturesBlue,
-      });
-      trailSourceGray?.setData({
-        type: "FeatureCollection",
-        features: trailFeaturesGray,
-      });
+      // Also load chunk 1 for lookahead
+      await loadUpcomingRides(1);
 
-      ref.rafId = requestAnimationFrame((ts) => animateFnRef.current?.(ts));
+      // Update state for initial render
+      setActiveTrips(Array.from(tripMapRef.current.values()));
+      setTripCount(tripMapRef.current.size);
     };
-  }, [mapRef, preparedTrips, windowStartMs, windowDurationMs, animationDurationMs]);
+
+    loadInitial();
+  }, [windowStartMs, loadUpcomingRides]);
+
+  // Calculate current real time for clock display
+  const currentRealTime = secondsToRealTime(time);
+  const currentChunk = getChunkIndex(time);
+
+  // On chunk change: prefetch upcoming, remove ended trips, sync state
+  useEffect(() => {
+    if (animState !== "playing") return;
+    if (currentChunk === lastChunkRef.current) return;
+
+    console.log(`Entered chunk ${currentChunk}`);
+    lastChunkRef.current = currentChunk;
+
+    // Prefetch next chunk
+    const nextChunk = currentChunk + LOOKAHEAD_CHUNKS + 1;
+    loadUpcomingRides(nextChunk);
+
+    // Remove trips that have ended
+    for (const [id, trip] of tripMapRef.current) {
+      if (trip.endTimeSeconds < time) {
+        tripMapRef.current.delete(id);
+      }
+    }
+
+    // Sync state for rendering
+    const currentTrips = Array.from(tripMapRef.current.values());
+    setActiveTrips(currentTrips);
+    setTripCount(currentTrips.length);
+  }, [currentChunk, time, animState, loadUpcomingRides]);
 
   const play = useCallback(() => {
-    animationRef.current.startTimestamp = null;
     setAnimState("playing");
-    animationRef.current.rafId = requestAnimationFrame((ts) =>
-      animateFnRef.current?.(ts)
-    );
+    setTime(0);
+    lastChunkRef.current = 0;
+    lastTimestampRef.current = null;
+
+    const tick = (timestamp: number) => {
+      if (lastTimestampRef.current !== null) {
+        const deltaMs = timestamp - lastTimestampRef.current;
+        const deltaSeconds = deltaMs / 1000;
+        setTime((t) => t + deltaSeconds * SPEEDUP);
+      }
+      lastTimestampRef.current = timestamp;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
   }, []);
 
   const replay = useCallback(() => {
-    if (animationRef.current.rafId) {
-      cancelAnimationFrame(animationRef.current.rafId);
+    // Stop current animation
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
     }
-    play();
-  }, [play]);
+    lastTimestampRef.current = null;
+
+    // Reset state
+    tripMapRef.current.clear();
+    loadingChunksRef.current.clear();
+    loadedChunksRef.current.clear();
+    initialLoadDone.current = false;
+    lastChunkRef.current = -1;
+    setActiveTrips([]);
+    setTripCount(0);
+
+    // Reload initial data
+    const loadInitial = async () => {
+      const data = await getTripsForChunk({
+        chunkStart: WINDOW_START,
+        chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
+      });
+      const prepared = prepareTripsForDeck({
+        trips: data.trips,
+        windowStartMs,
+      });
+
+      for (const trip of prepared) {
+        tripMapRef.current.set(trip.id, trip);
+      }
+      loadedChunksRef.current.add(0);
+
+      await loadUpcomingRides(1);
+
+      setActiveTrips(Array.from(tripMapRef.current.values()));
+      setTripCount(tripMapRef.current.size);
+
+      // Start animation
+      play();
+    };
+
+    loadInitial();
+  }, [windowStartMs, loadUpcomingRides, play]);
 
   // Cleanup on unmount
   useEffect(() => {
-    const ref = animationRef.current;
     return () => {
-      if (ref.rafId) {
-        cancelAnimationFrame(ref.rafId);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
       }
     };
   }, []);
 
+  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+    throw new Error("NEXT_PUBLIC_MAPBOX_TOKEN is not set");
+  }
+
+  const layers = [
+    new TripsLayer<DeckTrip>({
+      id: "trips",
+      data: activeTrips,
+      getPath: (d) => d.path,
+      getTimestamps: (d) => d.timestamps,
+      getColor: (d) => (d.vendor === 0 ? THEME.trailColor0 : THEME.trailColor1),
+      opacity: 0.3,
+      widthMinPixels: 2,
+      rounded: true,
+      trailLength: TRAIL_LENGTH_SECONDS,
+      currentTime: time,
+    }),
+  ];
+
   return (
-    <>
+    <div className="relative w-full h-full">
+      <DeckGL
+        layers={layers}
+        initialViewState={INITIAL_VIEW_STATE}
+        controller={true}
+      >
+        <MapboxMap
+          mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
+          mapStyle="mapbox://styles/mapbox/dark-v11"
+          reuseMaps
+        />
+      </DeckGL>
+
       {/* Clock display - top center */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
         <div className="bg-white/10 backdrop-blur-xl text-white text-sm font-medium px-3 py-1.5 rounded-lg">
-          <span ref={clockRef}>{formatTime(windowStartMs)}</span>
+          {formatTime(currentRealTime)}
+        </div>
+      </div>
+
+      {/* Stats - top right */}
+      <div className="absolute top-4 right-4 z-10">
+        <div className="bg-white/10 backdrop-blur-xl text-white text-xs px-3 py-2 rounded-lg">
+          <div className="font-medium mb-1">Active Trips</div>
+          <div className="text-lg font-bold">{tripCount.toLocaleString()}</div>
         </div>
       </div>
 
@@ -501,182 +408,6 @@ function AnimationController(props: {
           </button>
         )}
       </div>
-    </>
-  );
-}
-
-// Component to load custom icon into map
-function IconLoader() {
-  const { current: mapRef } = useMap();
-
-  useEffect(() => {
-    const map = mapRef?.getMap();
-    if (!map) return;
-
-    // Create a cursor-style pointer icon with rounded corners, rotated to point up
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <g transform="rotate(45 12 12)">
-          <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/>
-        </g>
-      </svg>
-    `;
-
-    const img = new Image(24, 24);
-    img.onload = () => {
-      if (!map.hasImage('caret')) {
-        map.addImage('caret', img, { sdf: true }); // sdf: true allows recoloring
-      }
-    };
-    img.src = 'data:image/svg+xml;base64,' + btoa(svg);
-  }, [mapRef]);
-
-  return null;
-}
-
-export const BikeMap = () => {
-  const [preparedTrips, setPreparedTrips] = useState<PreparedTrip[]>([]);
-  const [windowStartMs, setWindowStartMs] = useState(0);
-  const [windowDurationMs, setWindowDurationMs] = useState(0);
-
-  useEffect(() => {
-    const fetchTrips = async () => {
-      const data = await getActiveRides({
-        startTime: new Date("2025-06-08T16:00:00.000Z"), // 12pm EDT
-        endTime: new Date("2025-06-08T19:00:00.000Z"),   // 3pm EDT
-      });
-      console.log(`Found ${data.count} trips`);
-      
-
-
-      const startMs = data.startTime.getTime();
-      const endMs = data.endTime.getTime();
-
-      const prepared = prepareTrips({
-        trips: data.trips,
-        windowStartMs: startMs,
-        windowEndMs: endMs,
-      });
-
-      console.log(`Prepared ${prepared.length} trips with routes`);
-      setPreparedTrips(prepared);
-      setWindowStartMs(startMs);
-      setWindowDurationMs(endMs - startMs);
-    };
-    fetchTrips();
-  }, []);
-
-  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
-    throw new Error("NEXT_PUBLIC_MAPBOX_TOKEN is not set");
-  }
-
-  return (
-    <Map
-      id="bikemap"
-      mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
-      initialViewState={{
-        longitude: -74.0,
-        latitude: 40.7,
-        zoom: 14,
-      }}
-      mapStyle="mapbox://styles/mapbox/dark-v11"
-      style={{ width: "100%", height: "100%" }}
-    >
-      {/* Trail layers - rendered below bike icons */}
-      <Source id="trails-gray" type="geojson" data={EMPTY_GEOJSON} lineMetrics>
-        <Layer
-          id="trails-gray"
-          type="line"
-          layout={{ "line-cap": "round", "line-join": "round" }}
-          paint={{
-            "line-width": 3,
-            "line-gradient": [
-              "interpolate",
-              ["linear"],
-              ["line-progress"],
-              0,
-              "rgba(160, 160, 160, 0)",
-              1,
-              "rgba(160, 160, 160, 0.5)",
-            ],
-          }}
-        />
-      </Source>
-
-      <Source id="trails-blue" type="geojson" data={EMPTY_GEOJSON} lineMetrics>
-        <Layer
-          id="trails-blue"
-          type="line"
-          layout={{ "line-cap": "round", "line-join": "round" }}
-          paint={{
-            "line-width": 3,
-            "line-gradient": [
-              "interpolate",
-              ["linear"],
-              ["line-progress"],
-              0,
-              "rgba(96, 165, 250, 0)",
-              1,
-              "rgba(96, 165, 250, 0.5)",
-            ],
-          }}
-        />
-      </Source>
-
-      <Source id="riders" type="geojson" data={EMPTY_GEOJSON}>
-        <Layer
-          id="riders"
-          type="symbol"
-          layout={{
-            "icon-image": "caret",
-            "icon-size": 0.45,
-            "icon-rotate": ["get", "bearing"],
-            "icon-rotation-alignment": "map",
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
-          }}
-          paint={{
-            "icon-opacity": [
-              "case",
-              ["==", ["get", "phase"], "fading-in"],
-              ["*", ["get", "phaseProgress"], 0.8], // 0 → 0.8
-              ["==", ["get", "phase"], "fading-out"],
-              ["*", ["-", 1, ["get", "phaseProgress"]], 0.8], // 0.8 → 0
-              0.8, // moving = max opacity
-            ],
-            "icon-color": [
-              "case",
-              ["==", ["get", "phase"], "fading-in"],
-              "#22c55e", // green
-
-              ["==", ["get", "phase"], "transitioning-in"],
-              [
-                "interpolate",
-                ["linear"],
-                ["get", "phaseProgress"],
-                0, "#22c55e", // green at start
-                1, ["get", "color"], // gray/blue at end
-              ],
-
-              ["==", ["get", "phase"], "fading-out"],
-              "#ef4444", // red (instant)
-
-              ["get", "color"], // moving = gray/blue based on bike type
-            ],
-          }}
-        />
-      </Source>
-
-      <IconLoader />
-
-      {preparedTrips.length > 0 && windowDurationMs > 0 && (
-        <AnimationController
-          preparedTrips={preparedTrips}
-          windowStartMs={windowStartMs}
-          windowDurationMs={windowDurationMs}
-          animationDurationMs={windowDurationMs / SPEEDUP}
-        />
-      )}
-    </Map>
+    </div>
   );
 };
