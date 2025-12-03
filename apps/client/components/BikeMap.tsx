@@ -12,8 +12,8 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap } from "react-map-gl/mapbox";
 
-import { LinearInterpolator } from "@deck.gl/core";
 import type { Color, MapViewState } from "@deck.gl/core";
+import { LinearInterpolator } from "@deck.gl/core";
 
 // Infer types from server function
 type ChunkResponse = Awaited<ReturnType<typeof getTripsForChunk>>;
@@ -34,6 +34,12 @@ type DeckTrip = {
   visibleEndSeconds: number; // when bike disappears (fade-out ends)
   cumulativeDistances: number[]; // meters from route start
   lastSegmentIndex: number; // cached cursor for O(1) segment lookup
+  // Precomputed phase boundaries (avoid recalculating each frame)
+  fadeInEndSeconds: number;
+  transitionInEndSeconds: number;
+  // Precomputed bearings for stationary phases
+  firstSegmentBearing: number;
+  lastSegmentBearing: number;
   // Mutable state (updated in place each frame to avoid allocations)
   currentPosition: [number, number];
   currentBearing: number;
@@ -61,7 +67,7 @@ const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
 const LOOKAHEAD_CHUNKS = 1;
 
 // Animation start time
-const WINDOW_START = new Date("2025-06-08T16:00:00.000Z"); // 4am EDT (8am UTC)
+const WINDOW_START = new Date("2025-06-30T16:00:00.000Z"); // 12:00pm EDT (16:00 UTC)
 
 const THEME = {
   trailColor0: [187, 154, 247] as Color, // purple
@@ -305,6 +311,22 @@ function prepareTripsForDeck(data: {
         return tripStartSeconds + timeFraction * tripDurationSeconds;
       });
 
+      // Precompute phase boundaries
+      const visibleStartSeconds = tripStartSeconds - FADE_DURATION_SIM_SECONDS - TRANSITION_DURATION_SIM_SECONDS;
+      const fadeInEndSeconds = visibleStartSeconds + FADE_DURATION_SIM_SECONDS;
+      const transitionInEndSeconds = fadeInEndSeconds + TRANSITION_DURATION_SIM_SECONDS;
+
+      // Precompute first segment bearing (for fade-in)
+      const fdx0 = coordinates[1][0] - coordinates[0][0];
+      const fdy0 = coordinates[1][1] - coordinates[0][1];
+      const firstSegmentBearing = Math.atan2(fdx0, fdy0) * (180 / Math.PI);
+
+      // Precompute last segment bearing (for fade-out)
+      const lastIdx = coordinates.length - 1;
+      const fdxN = coordinates[lastIdx][0] - coordinates[lastIdx - 1][0];
+      const fdyN = coordinates[lastIdx][1] - coordinates[lastIdx - 1][1];
+      const lastSegmentBearing = Math.atan2(fdxN, fdyN) * (180 / Math.PI);
+
       return {
         id: trip.id,
         path: coordinates,
@@ -312,10 +334,14 @@ function prepareTripsForDeck(data: {
         bikeType: trip.rideableType,
         startTimeSeconds: tripStartSeconds,
         endTimeSeconds: tripEndSeconds,
-        visibleStartSeconds: tripStartSeconds - FADE_DURATION_SIM_SECONDS - TRANSITION_DURATION_SIM_SECONDS,
+        visibleStartSeconds,
         visibleEndSeconds: tripEndSeconds + Math.max(FADE_DURATION_SIM_SECONDS, TRAIL_LENGTH_SECONDS),
         cumulativeDistances,
         lastSegmentIndex: 0,
+        fadeInEndSeconds,
+        transitionInEndSeconds,
+        firstSegmentBearing,
+        lastSegmentBearing,
         // Mutable state - initialized once, updated in place each frame
         currentPosition: [0, 0] as [number, number],
         currentBearing: 0,
@@ -333,13 +359,14 @@ function prepareTripsForDeck(data: {
 // Update trip's mutable state in place. Returns true if visible.
 function updateTripState(trip: DeckTrip, currentTime: number): boolean {
   const {
-    timestamps,
     path,
-    startTimeSeconds,
-    endTimeSeconds,
     visibleStartSeconds,
     visibleEndSeconds,
-    cumulativeDistances,
+    fadeInEndSeconds,
+    transitionInEndSeconds,
+    endTimeSeconds,
+    firstSegmentBearing,
+    lastSegmentBearing,
   } = trip;
 
   // Not visible yet or already gone
@@ -348,84 +375,80 @@ function updateTripState(trip: DeckTrip, currentTime: number): boolean {
     return false;
   }
 
-  // Calculate phase boundaries (matching original timing exactly)
-  const fadeInEnd = visibleStartSeconds + FADE_DURATION_SIM_SECONDS;
-  const transitionInEnd = fadeInEnd + TRANSITION_DURATION_SIM_SECONDS; // = startTimeSeconds
-  const fadeOutStart = endTimeSeconds; // movement stops at actual trip end
-
-  // Determine phase and progress
+  // Determine phase and progress using precomputed boundaries
   let phase: Phase;
   let phaseProgress: number;
 
-  if (currentTime < fadeInEnd) {
+  if (currentTime < fadeInEndSeconds) {
     phase = "fading-in";
     phaseProgress = (currentTime - visibleStartSeconds) / FADE_DURATION_SIM_SECONDS;
-  } else if (currentTime < transitionInEnd) {
+  } else if (currentTime < transitionInEndSeconds) {
     phase = "transitioning-in";
-    phaseProgress = (currentTime - fadeInEnd) / TRANSITION_DURATION_SIM_SECONDS;
-  } else if (currentTime >= fadeOutStart) {
+    phaseProgress = (currentTime - fadeInEndSeconds) / TRANSITION_DURATION_SIM_SECONDS;
+  } else if (currentTime >= endTimeSeconds) {
     phase = "fading-out";
-    phaseProgress = (currentTime - fadeOutStart) / FADE_DURATION_SIM_SECONDS;
+    phaseProgress = (currentTime - endTimeSeconds) / FADE_DURATION_SIM_SECONDS;
   } else {
     phase = "moving";
     phaseProgress = 1;
   }
 
-  // Calculate position based on phase
-  let idx = 0;
-  let t = 0;
-
+  // Fast path for stationary phases - skip expensive look-ahead calculation
   if (phase === "fading-in") {
-    // Stationary at start position
     trip.currentPosition[0] = path[0][0];
     trip.currentPosition[1] = path[0][1];
-  } else if (phase === "fading-out") {
-    // Stationary at end position
+    trip.currentBearing = interpolateAngle(0, firstSegmentBearing, phaseProgress);
+    trip.currentPhase = phase;
+    trip.currentPhaseProgress = phaseProgress;
+    trip.isVisible = true;
+    return true;
+  }
+
+  if (phase === "fading-out") {
     trip.currentPosition[0] = path[path.length - 1][0];
     trip.currentPosition[1] = path[path.length - 1][1];
-    idx = path.length - 2;
-    t = 1;
+    trip.currentBearing = lastSegmentBearing;
+    trip.currentPhase = phase;
+    trip.currentPhaseProgress = phaseProgress;
+    trip.isVisible = true;
+    return true;
+  }
+
+  // Moving phases: interpolate along route with look-ahead bearing
+  const { timestamps, cumulativeDistances } = trip;
+  const movingDuration = endTimeSeconds - transitionInEndSeconds;
+  const movingProgress = movingDuration > 0
+    ? Math.max(0, Math.min(1, (currentTime - transitionInEndSeconds) / movingDuration))
+    : 1;
+
+  // Map to timestamp along route
+  const tripTime = timestamps[0] + movingProgress * (timestamps[timestamps.length - 1] - timestamps[0]);
+
+  // Use cached index and scan forward (time only increases)
+  let idx = trip.lastSegmentIndex;
+  while (idx < timestamps.length - 1 && timestamps[idx + 1] < tripTime) {
+    idx++;
+  }
+  trip.lastSegmentIndex = idx;
+
+  let t = 0;
+  if (idx >= path.length - 1) {
+    trip.currentPosition[0] = path[path.length - 1][0];
+    trip.currentPosition[1] = path[path.length - 1][1];
   } else {
-    // transitioning-in or moving: interpolate along route
-    const movingStart = transitionInEnd;
-    const movingEnd = fadeOutStart;
-    const movingDuration = movingEnd - movingStart;
-    const movingProgress = movingDuration > 0
-      ? Math.max(0, Math.min(1, (currentTime - movingStart) / movingDuration))
-      : 1;
+    const t0 = timestamps[idx];
+    const t1 = timestamps[idx + 1];
+    t = t1 > t0 ? (tripTime - t0) / (t1 - t0) : 0;
 
-    // Map to timestamp along route
-    const tripTime = timestamps[0] + movingProgress * (timestamps[timestamps.length - 1] - timestamps[0]);
-
-    // Use cached index and scan forward (time only increases)
-    idx = trip.lastSegmentIndex;
-    while (idx < timestamps.length - 1 && timestamps[idx + 1] < tripTime) {
-      idx++;
-    }
-    trip.lastSegmentIndex = idx;
-
-    if (idx >= path.length - 1) {
-      trip.currentPosition[0] = path[path.length - 1][0];
-      trip.currentPosition[1] = path[path.length - 1][1];
-    } else {
-      const t0 = timestamps[idx];
-      const t1 = timestamps[idx + 1];
-      t = t1 > t0 ? (tripTime - t0) / (t1 - t0) : 0;
-
-      const p0 = path[idx];
-      const p1 = path[idx + 1];
-      trip.currentPosition[0] = p0[0] + t * (p1[0] - p0[0]);
-      trip.currentPosition[1] = p0[1] + t * (p1[1] - p0[1]);
-    }
+    const p0 = path[idx];
+    const p1 = path[idx + 1];
+    trip.currentPosition[0] = p0[0] + t * (p1[0] - p0[0]);
+    trip.currentPosition[1] = p0[1] + t * (p1[1] - p0[1]);
   }
 
   // Calculate bearing using look-ahead point (~20m ahead)
   const cumDist = cumulativeDistances;
-  const currentDist = phase === "fading-in"
-    ? 0
-    : phase === "fading-out"
-      ? cumDist[cumDist.length - 1]
-      : cumDist[idx] + t * ((cumDist[idx + 1] ?? cumDist[idx]) - cumDist[idx]);
+  const currentDist = cumDist[idx] + t * ((cumDist[idx + 1] ?? cumDist[idx]) - cumDist[idx]);
   const totalDist = cumDist[cumDist.length - 1];
   const lookAheadDist = Math.min(currentDist + 20, totalDist);
 
@@ -447,20 +470,7 @@ function updateTripState(trip: DeckTrip, currentTime: number): boolean {
   // Calculate bearing from current position to look-ahead point
   const dx = lookAheadX - trip.currentPosition[0];
   const dy = lookAheadY - trip.currentPosition[1];
-  let targetBearing = Math.atan2(dx, dy) * (180 / Math.PI);
-
-  // During fade-out, use final segment bearing (look-ahead equals current position, so dx=dy=0)
-  if (phase === "fading-out" && path.length >= 2) {
-    const lastIdx = path.length - 1;
-    const fdx = path[lastIdx][0] - path[lastIdx - 1][0];
-    const fdy = path[lastIdx][1] - path[lastIdx - 1][1];
-    targetBearing = Math.atan2(fdx, fdy) * (180 / Math.PI);
-  }
-
-  // During fade-in, rotate from 0° (north) to target bearing
-  trip.currentBearing = phase === "fading-in"
-    ? interpolateAngle(0, targetBearing, phaseProgress)
-    : targetBearing;
+  trip.currentBearing = Math.atan2(dx, dy) * (180 / Math.PI);
 
   // Update phase state
   trip.currentPhase = phase;
