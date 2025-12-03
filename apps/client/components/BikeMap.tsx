@@ -34,7 +34,7 @@ type DeckTrip = {
 };
 
 // Animation config - all times in seconds
-const SPEEDUP = 100;
+const SPEEDUP = 150;
 const TRAIL_LENGTH_SECONDS = 45;
 const EASE_DISTANCE_METERS = 300; // Fixed easing distance at start/end of trips
 
@@ -51,7 +51,7 @@ const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
 const LOOKAHEAD_CHUNKS = 1;
 
 // Animation start time
-const WINDOW_START = new Date("2025-06-08T17:00:00.000Z"); // 4am EDT (8am UTC)
+const WINDOW_START = new Date("2025-06-08T16:00:00.000Z"); // 4am EDT (8am UTC)
 
 const THEME = {
   trailColor0: [187, 154, 247] as Color, // purple
@@ -352,6 +352,7 @@ export const BikeMap = () => {
   const lastTimestampRef = useRef<number | null>(null);
   const fpsRef = useRef<HTMLDivElement>(null);
   const smoothedFpsRef = useRef(60);
+  const lastFpsUpdateRef = useRef(0);
   const tripMapRef = useRef<Map<string, DeckTrip>>(new Map());
   const loadingChunksRef = useRef<Set<number>>(new Set());
   const loadedChunksRef = useRef<Set<number>>(new Set());
@@ -485,8 +486,9 @@ export const BikeMap = () => {
         setTime((t) => t + deltaSeconds * SPEEDUP);
         const currentFps = 1000 / deltaMs;
         smoothedFpsRef.current = smoothedFpsRef.current * 0.9 + currentFps * 0.1;
-        if (fpsRef.current) {
+        if (fpsRef.current && timestamp - lastFpsUpdateRef.current >= 100) {
           fpsRef.current.textContent = `${Math.round(smoothedFpsRef.current)} FPS`;
+          lastFpsUpdateRef.current = timestamp;
         }
       }
       lastTimestampRef.current = timestamp;
