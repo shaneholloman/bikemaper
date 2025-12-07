@@ -35,6 +35,11 @@ type SearchStep = "station" | "datetime" | "results"
 
 const MAX_RESULTS = 10
 
+type StationRegion = {
+  region: string
+  neighborhood: string
+}
+
 function formatDistance(meters: number): string {
   if (meters < 1000) {
     return `${Math.round(meters)}m`
@@ -93,6 +98,7 @@ export function Search() {
   const [datetimeInput, setDatetimeInput] = React.useState("")
   const [trips, setTrips] = React.useState<Trip[]>([])
   const [resultsSearch, setResultsSearch] = React.useState("")
+  const [stationRegions, setStationRegions] = React.useState<Record<string, StationRegion>>({})
 
   const { pickedLocation, startPicking, clearPicking } = usePickerStore()
 
@@ -127,6 +133,24 @@ export function Search() {
   React.useEffect(() => {
     getStations().then(setStations)
   }, [])
+
+  // Load station regions
+  React.useEffect(() => {
+    fetch("/station-regions.json")
+      .then((res) => res.json())
+      .then(setStationRegions)
+  }, [])
+
+  // Get region for a station by checking all its IDs
+  const getStationRegion = React.useCallback(
+    (stationIds: string[]): StationRegion | null => {
+      for (const id of stationIds) {
+        if (stationRegions[id]) return stationRegions[id]
+      }
+      return null
+    },
+    [stationRegions]
+  )
 
   // Re-open dialog when location is picked
   React.useEffect(() => {
@@ -227,7 +251,7 @@ export function Search() {
   // Render datetime step
   if (step === "datetime" && selectedStation) {
     return (
-      <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false}>
+      <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false} className="sm:max-w-xl">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
             onClick={handleBackToStation}
@@ -262,7 +286,7 @@ export function Search() {
   // Render results step
   if (step === "results" && selectedStation) {
     return (
-      <CommandDialog open={open} onOpenChange={handleOpenChange}>
+      <CommandDialog open={open} onOpenChange={handleOpenChange} className="sm:max-w-xl">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
             onClick={handleBackToDatetime}
@@ -298,9 +322,12 @@ export function Search() {
                     <span className="text-zinc-100 font-normal truncate max-w-[30ch]">
                       {getStationName(trip.endStationId, stationMap)}
                     </span>
-                    {trip.routeDistance && (
-                      <span className="text-sm text-muted-foreground">{formatDistance(trip.routeDistance)}</span>
-                    )}
+                    <div className="flex gap-2 text-sm text-muted-foreground">
+                      {stationRegions[trip.endStationId]?.neighborhood && (
+                        <span>{stationRegions[trip.endStationId].neighborhood}</span>
+                      )}
+                      {trip.routeDistance && <span>{formatDistance(trip.routeDistance)}</span>}
+                    </div>
                   </div>
                 </div>
               </CommandItem>
@@ -313,28 +340,32 @@ export function Search() {
 
   // Render station step (default)
   return (
-    <CommandDialog open={open} onOpenChange={handleOpenChange}>
+    <CommandDialog open={open} onOpenChange={handleOpenChange} className="sm:max-w-xl">
       <CommandInput
         placeholder={pickedLocation ? "Filter nearby stations..." : "Type a station name..."}
         value={search}
         onValueChange={setSearch}
       />
-      <CommandList>
+      <CommandList className="max-h-[500px]">
         <CommandEmpty>No results found.</CommandEmpty>
-        <CommandGroup heading="Actions">
-          {pickedLocation ? (
-            <CommandItem onSelect={handleClearLocation}>
-              <X className="size-4" />
-              Clear picked location
-            </CommandItem>
-          ) : (
-            <CommandItem onSelect={handlePickFromMap}>
-              <MapPin className="size-4" />
-              Pick location from map
-            </CommandItem>
-          )}
-        </CommandGroup>
-        <CommandSeparator />
+        {!search.trim() && (
+          <>
+            <CommandGroup heading="Actions">
+              {pickedLocation ? (
+                <CommandItem onSelect={handleClearLocation}>
+                  <X className="size-4" />
+                  Clear picked location
+                </CommandItem>
+              ) : (
+                <CommandItem onSelect={handlePickFromMap}>
+                  <MapPin className="size-4" />
+                  Pick location from map
+                </CommandItem>
+              )}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
         <CommandGroup heading={pickedLocation ? "Nearest Stations" : "Citibike Stations"}>
           {filteredStations.map((station) => (
             <CommandItem
@@ -343,7 +374,14 @@ export function Search() {
               onSelect={() => handleSelectStation(station)}
             >
               <Bike className="size-4" />
-              <span className="flex-1">{station.name}</span>
+              <div className="flex flex-col flex-1">
+                <span>{station.name}</span>
+                {getStationRegion(station.ids) && (
+                  <span className="text-xs text-muted-foreground">
+                    {getStationRegion(station.ids)?.neighborhood}, {getStationRegion(station.ids)?.region}
+                  </span>
+                )}
+              </div>
               {"distance" in station && (
                 <span className="text-muted-foreground text-xs">
                   {formatDistance(station.distance)}
