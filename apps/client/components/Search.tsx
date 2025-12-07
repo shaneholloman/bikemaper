@@ -92,6 +92,7 @@ export function Search() {
   const [selectedStation, setSelectedStation] = React.useState<Station | null>(null)
   const [datetimeInput, setDatetimeInput] = React.useState("")
   const [trips, setTrips] = React.useState<Trip[]>([])
+  const [resultsSearch, setResultsSearch] = React.useState("")
 
   const { pickedLocation, startPicking, clearPicking } = usePickerStore()
 
@@ -261,7 +262,7 @@ export function Search() {
   // Render results step
   if (step === "results" && selectedStation) {
     return (
-      <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false}>
+      <CommandDialog open={open} onOpenChange={handleOpenChange}>
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
             onClick={handleBackToDatetime}
@@ -274,10 +275,11 @@ export function Search() {
             · {trips.length} ride{trips.length !== 1 ? "s" : ""}
           </span>
         </div>
+        <CommandInput placeholder="Search end station..." value={resultsSearch} onValueChange={setResultsSearch} />
         <CommandList className="max-h-[500px]">
           <CommandGroup>
             {trips.map((trip) => (
-              <CommandItem key={trip.id} value={trip.id} onSelect={() => handleSelectTrip(trip)}>
+              <CommandItem key={trip.id} value={`${trip.id} ${getStationName(trip.endStationId, stationMap)}`} onSelect={() => handleSelectTrip(trip)}>
                 <div className="flex items-center gap-3 w-full">
                   {trip.rideableType === "electric_bike" ? (
                     <EBike className="size-8 text-[#7DCFFF] shrink-0" />
@@ -293,7 +295,7 @@ export function Search() {
                     </span>
                   </div>
                   <div className="ml-auto flex flex-col items-end">
-                    <span className="text-zinc-400 font-medium truncate max-w-[30ch]">
+                    <span className="text-zinc-100 font-normal truncate max-w-[30ch]">
                       {getStationName(trip.endStationId, stationMap)}
                     </span>
                     {trip.routeDistance && (
