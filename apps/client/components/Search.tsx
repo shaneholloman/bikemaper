@@ -274,10 +274,10 @@ export function Search() {
             · {trips.length} ride{trips.length !== 1 ? "s" : ""}
           </span>
         </div>
-        <CommandList>
+        <CommandList className="max-h-[500px]">
           <CommandGroup>
             {trips.map((trip) => (
-              <CommandItem key={trip.id} onSelect={() => handleSelectTrip(trip)}>
+              <CommandItem key={trip.id} value={trip.id} onSelect={() => handleSelectTrip(trip)}>
                 <div className="flex items-center gap-3 w-full">
                   {trip.rideableType === "electric_bike" ? (
                     <EBike className="size-8 text-[#7DCFFF] shrink-0" />
