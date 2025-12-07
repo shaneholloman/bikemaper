@@ -1,6 +1,7 @@
 "use client";
 
 import { getRidesStartingIn as getRidesInWindow, getTripsForChunk } from "@/app/server/trips";
+import { REFERENCE_DATE } from "@/lib/config";
 import { usePickerStore } from "@/lib/store";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
@@ -67,8 +68,7 @@ const TRANSITION_DURATION_SIM_SECONDS = (TRANSITION_DURATION_MS / 1000) * SPEEDU
 const CHUNK_SIZE_SECONDS = 15 * 60; // 15 minutes in seconds
 const LOOKAHEAD_CHUNKS = 1;
 
-// Animation start time
-const WINDOW_START = new Date("2025-06-04T22:00:00.000Z"); // 6:00pm EDT (22:00 UTC)
+// Animation start time (imported from config)
 
 const THEME = {
   trailColor0: [187, 154, 247] as Color, // purple
@@ -492,7 +492,7 @@ function updateTripState(trip: DeckTrip, currentTime: number): boolean {
 }
 
 export const BikeMap = () => {
-  const windowStartMs = WINDOW_START.getTime();
+  const windowStartMs = REFERENCE_DATE.getTime();
 
   const [activeTrips, setActiveTrips] = useState<DeckTrip[]>([]);
   const [tripCount, setTripCount] = useState(0);
@@ -574,7 +574,7 @@ export const BikeMap = () => {
       console.log("Loading initial rides...");
       // Get rides that overlap with t=0 (already in progress)
       const data = await getTripsForChunk({
-        chunkStart: WINDOW_START,
+        chunkStart: REFERENCE_DATE,
         chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
       });
       const prepared = prepareTripsForDeck({
@@ -672,7 +672,7 @@ export const BikeMap = () => {
     // Reload initial data
     const loadInitial = async () => {
       const data = await getTripsForChunk({
-        chunkStart: WINDOW_START,
+        chunkStart: REFERENCE_DATE,
         chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
       });
       const prepared = prepareTripsForDeck({

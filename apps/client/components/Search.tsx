@@ -1,11 +1,13 @@
 "use client"
 import { getStations } from "@/app/server/trips"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
+import { REFERENCE_DATE } from "@/lib/config"
 import { usePickerStore } from "@/lib/store"
 import distance from "@turf/distance"
 import { point } from "@turf/helpers"
+import * as chrono from "chrono-node"
 import { Fzf } from "fzf"
-import { Bike, MapPin, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, Bike, CalendarSearch, MapPin, X } from "lucide-react"
 import React from "react"
 
 type Station = {
@@ -17,6 +19,8 @@ type Station = {
 
 type StationWithDistance = Station & { distance: number }
 
+type SearchStep = "station" | "datetime"
+
 const MAX_RESULTS = 10
 
 function formatDistance(meters: number): string {
@@ -26,12 +30,38 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)}km`
 }
 
+function formatDateTime(date: Date): string {
+  const currentYear = new Date().getFullYear()
+  const dateYear = date.getFullYear()
+
+  return date.toLocaleString("en-US", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: dateYear !== currentYear ? "numeric" : undefined,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+}
+
 export function Search() {
   const [open, setOpen] = React.useState(false)
   const [stations, setStations] = React.useState<Station[]>([])
   const [search, setSearch] = React.useState("")
 
+  // Multi-step flow state
+  const [step, setStep] = React.useState<SearchStep>("station")
+  const [selectedStation, setSelectedStation] = React.useState<Station | null>(null)
+  const [datetimeInput, setDatetimeInput] = React.useState("")
+
   const { pickedLocation, startPicking, clearPicking } = usePickerStore()
+
+  // Parse datetime with chrono
+  const parsedDate = React.useMemo(() => {
+    if (!datetimeInput.trim()) return null
+    return chrono.parseDate(datetimeInput, REFERENCE_DATE)
+  }, [datetimeInput])
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -54,6 +84,17 @@ export function Search() {
       setOpen(true)
     }
   }, [pickedLocation])
+
+  // Reset state when dialog closes
+  const handleOpenChange = (newOpen: boolean) => {
+    setOpen(newOpen)
+    if (!newOpen) {
+      setStep("station")
+      setSelectedStation(null)
+      setDatetimeInput("")
+      setSearch("")
+    }
+  }
 
   const fzf = React.useMemo(
     () => new Fzf(stations, { selector: (s) => s.name }),
@@ -96,8 +137,66 @@ export function Search() {
     clearPicking()
   }
 
+  const handleSelectStation = (station: Station | StationWithDistance) => {
+    setSelectedStation(station)
+    setStep("datetime")
+    setSearch("")
+  }
+
+  const handleBackToStation = () => {
+    setStep("station")
+    setSelectedStation(null)
+    setDatetimeInput("")
+  }
+
+  const handleConfirmSelection = () => {
+    if (selectedStation && parsedDate) {
+      console.log("Final selection:", {
+        station: selectedStation,
+        datetime: parsedDate,
+      })
+      handleOpenChange(false)
+    }
+  }
+
+  // Render datetime step
+  if (step === "datetime" && selectedStation) {
+    return (
+      <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false}>
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <button
+            onClick={handleBackToStation}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <Bike className="size-4 text-muted-foreground" />
+          <span className="font-medium">{selectedStation.name}</span>
+        </div>
+        <CommandInput
+          autoFocus
+          placeholder="Specify a date..."
+          value={datetimeInput}
+          onValueChange={setDatetimeInput}
+          icon={<CalendarSearch className="size-4 shrink-0 text-muted-foreground" />}
+        />
+        <CommandList>
+          {parsedDate && (
+            <CommandGroup>
+              <CommandItem onSelect={handleConfirmSelection} className="bg-accent">
+                <ArrowRight className="size-4" />
+                {formatDateTime(parsedDate)}
+              </CommandItem>
+            </CommandGroup>
+          )}
+        </CommandList>
+      </CommandDialog>
+    )
+  }
+
+  // Render station step (default)
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
+    <CommandDialog open={open} onOpenChange={handleOpenChange}>
       <CommandInput
         placeholder={pickedLocation ? "Filter nearby stations..." : "Type a station name..."}
         value={search}
@@ -124,10 +223,7 @@ export function Search() {
             <CommandItem
               key={station.name}
               value={station.name}
-              onSelect={() => {
-                console.log("Selected station:", station)
-                setOpen(false)
-              }}
+              onSelect={() => handleSelectStation(station)}
             >
               <Bike className="size-4" />
               <span className="flex-1">{station.name}</span>
