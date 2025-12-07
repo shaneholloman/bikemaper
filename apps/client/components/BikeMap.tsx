@@ -1,6 +1,7 @@
 "use client";
 
 import { getRidesStartingIn as getRidesInWindow, getTripsForChunk } from "@/app/server/trips";
+import { usePickerStore } from "@/lib/store";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { IconLayer, PathLayer } from "@deck.gl/layers";
@@ -11,7 +12,6 @@ import { point } from "@turf/helpers";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap } from "react-map-gl/mapbox";
-import { usePickerStore } from "@/lib/store";
 
 import type { Color, MapViewState } from "@deck.gl/core";
 import { LinearInterpolator } from "@deck.gl/core";
@@ -88,10 +88,10 @@ const ARROW_SVG = `data:image/svg+xml;base64,${btoa(`
 `)}`;
 
 const INITIAL_VIEW_STATE: MapViewState = {
-  longitude: -74.0,
-  latitude: 40.7,
+  longitude: -73.9903, // Manhattan Bridge center
+  latitude: 40.7074,
   zoom: 13,
-  pitch: 45,
+  pitch: 0, // Bird's eye view (straight down)
   bearing: 0,
 };
 
