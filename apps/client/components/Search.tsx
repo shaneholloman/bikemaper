@@ -8,7 +8,7 @@ import distance from "@turf/distance"
 import { point } from "@turf/helpers"
 import * as chrono from "chrono-node"
 import { Fzf } from "fzf"
-import { ArrowLeft, ArrowRight, Bike, CalendarSearch, Clock, MapPin, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, Bike, CalendarSearch, MapPin, X } from "lucide-react"
 import React from "react"
 
 type Station = {
@@ -28,6 +28,7 @@ type Trip = {
   endedAt: Date
   rideableType: string
   memberCasual: string
+  routeDistance: number | null
 }
 
 type SearchStep = "station" | "datetime" | "results"
@@ -56,25 +57,29 @@ function formatDateTime(date: Date): string {
   })
 }
 
-function formatDuration(startedAt: Date, endedAt: Date): string {
+function formatDurationMinutes(startedAt: Date, endedAt: Date): string {
   const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime()
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  const minutes = Math.round(ms / 60000)
+  return `${minutes} min${minutes !== 1 ? "s" : ""}`
 }
 
-function formatTime(date: Date): string {
-  return new Date(date).toLocaleTimeString("en-US", {
+function formatDateTimeFull(date: Date): string {
+  return new Date(date).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   })
 }
 
-function getStationName(stationId: string, stations: Station[]): string {
-  const station = stations.find((s) => s.ids.includes(stationId))
-  return station?.name ?? stationId
+function getStationName(stationId: string, stationMap: Map<string, Station>): string {
+  const station = stationMap.get(stationId)
+  if (!station) {
+    throw new Error(`Station not found: ${stationId}`)
+  }
+  return station.name
 }
 
 export function Search() {
@@ -95,6 +100,17 @@ export function Search() {
     if (!datetimeInput.trim()) return null
     return chrono.parseDate(datetimeInput, REFERENCE_DATE)
   }, [datetimeInput])
+
+  // Map station IDs to stations for O(1) lookup
+  const stationMap = React.useMemo(() => {
+    const map = new Map<string, Station>()
+    for (const station of stations) {
+      for (const id of station.ids) {
+        map.set(id, station)
+      }
+    }
+    return map
+  }, [stations])
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -196,6 +212,7 @@ export function Search() {
         datetime: parsedDate,
         intervalSeconds: 1800,
       })
+      console.log("Trips from station:", result.trips)
       setTrips(result.trips)
       setStep("results")
     }
@@ -252,30 +269,36 @@ export function Search() {
           >
             <ArrowLeft className="size-4" />
           </button>
-          <span className="font-medium">
-            {trips.length} ride{trips.length !== 1 ? "s" : ""} found
+          <span className="font-medium truncate">{selectedStation.name}</span>
+          <span className="text-muted-foreground shrink-0">
+            · {trips.length} ride{trips.length !== 1 ? "s" : ""}
           </span>
         </div>
         <CommandList>
           <CommandGroup>
             {trips.map((trip) => (
               <CommandItem key={trip.id} onSelect={() => handleSelectTrip(trip)}>
-                <div className="flex flex-col gap-1 w-full">
-                  <div className="flex items-center gap-2">
-                    <Clock className="size-3 text-muted-foreground" />
-                    <span className="font-medium tabular-nums w-20">{formatTime(trip.startedAt)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground tabular-nums w-12">{formatDuration(trip.startedAt, trip.endedAt)}</span>
-                    <div className="ml-auto flex items-center gap-2">
-                      {trip.rideableType === "electric_bike" ? (
-                        <EBike className="size-4 text-[#7DCFFF]" />
-                      ) : (
-                        <Bike className="size-4 text-[#BB9AF7]" />
-                      )}
-                    </div>
+                <div className="flex items-center gap-3 w-full">
+                  {trip.rideableType === "electric_bike" ? (
+                    <EBike className="size-8 text-[#7DCFFF] shrink-0" />
+                  ) : (
+                    <Bike className="size-8 text-[#BB9AF7] shrink-0" />
+                  )}
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-medium">
+                      Bike ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {formatDateTimeFull(trip.startedAt)}
+                    </span>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {getStationName(trip.startStationId, stations)} → {getStationName(trip.endStationId, stations)}
+                  <div className="ml-auto flex flex-col items-end text-muted-foreground">
+                    <span className="text-xs truncate max-w-[30ch]">
+                      {getStationName(trip.endStationId, stationMap)}
+                    </span>
+                    {trip.routeDistance && (
+                      <span className="text-xs">{formatDistance(trip.routeDistance)}</span>
+                    )}
                   </div>
                 </div>
               </CommandItem>
