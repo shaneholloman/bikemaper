@@ -189,3 +189,63 @@ export async function getStations() {
 
   return stations;
 }
+
+// Get trips from a specific station within a time window (datetime ± interval)
+export async function getTripsFromStation(params: {
+  startStationId: string;
+  datetime: Date;
+  intervalSeconds: number;
+}) {
+  const { startStationId, datetime, intervalSeconds } = params;
+
+  const windowStart = new Date(datetime.getTime() - intervalSeconds * 1000);
+  const windowEnd = new Date(datetime.getTime() + intervalSeconds * 1000);
+
+  const tripsWithRoutes = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      startStationId: string;
+      endStationId: string;
+      startedAt: Date;
+      endedAt: Date;
+      rideableType: string;
+      memberCasual: string;
+      startLat: number;
+      startLng: number;
+      endLat: number | null;
+      endLng: number | null;
+      routeGeometry: string | null;
+      routeDistance: number | null;
+      routeDuration: number | null;
+    }>
+  >`
+    SELECT
+      t.id,
+      t.startStationId,
+      t.endStationId,
+      t.startedAt,
+      t.endedAt,
+      t.rideableType,
+      t.memberCasual,
+      t.startLat,
+      t.startLng,
+      t.endLat,
+      t.endLng,
+      r.geometry as routeGeometry,
+      r.distance as routeDistance,
+      r.duration as routeDuration
+    FROM Trip t
+    LEFT JOIN Route r
+      ON r.startStationId = t.startStationId
+      AND r.endStationId = t.endStationId
+    WHERE t.startStationId = ${startStationId}
+      AND t.startedAt >= ${windowStart}
+      AND t.startedAt <= ${windowEnd}
+    ORDER BY t.startedAt ASC
+  `;
+
+  return {
+    count: tripsWithRoutes.length,
+    trips: tripsWithRoutes,
+  };
+}
