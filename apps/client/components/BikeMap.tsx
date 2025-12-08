@@ -3,6 +3,7 @@
 import { getRidesStartingIn as getRidesInWindow, getTripsForChunk } from "@/app/server/trips";
 import { useAnimationStore } from "@/lib/animation-store";
 import { usePickerStore } from "@/lib/store";
+import { filterTrips } from "@/lib/trip-filters";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { IconLayer, PathLayer } from "@deck.gl/layers";
@@ -252,12 +253,10 @@ function prepareTripsForDeck(data: {
 }): DeckTrip[] {
   const { trips, windowStartMs, fadeDurationSimSeconds } = data;
 
-  const prepared = trips
-    .filter(
-      (trip): trip is Trip & { routeGeometry: string } =>
-        trip.routeGeometry !== null &&
-        trip.startStationId !== trip.endStationId
-    )
+  // Pre-filter trips using shared filter logic
+  const validTrips = filterTrips(trips) as (Trip & { routeGeometry: string })[];
+
+  const prepared = validTrips
     .map((trip) => {
       // Decode polyline6 - returns [lat, lng][], flip to [lng, lat]
       const decoded = polyline.decode(trip.routeGeometry, 6);
@@ -280,16 +279,9 @@ function prepareTripsForDeck(data: {
 
       const totalDistance = cumulativeDistances[cumulativeDistances.length - 1];
 
-      // Calculate implied speed and filter unrealistic trips
+      // Convert to seconds from window start
       const tripStartMs = new Date(trip.startedAt).getTime();
       const tripEndMs = new Date(trip.endedAt).getTime();
-      const tripDurationHours = (tripEndMs - tripStartMs) / (1000 * 60 * 60);
-      const speedKmh = totalDistance / 1000 / tripDurationHours;
-
-      // Skip trips faster than 20 km/h or slower than 2 km/h
-      if (speedKmh > 18 || speedKmh < 2) return null;
-
-      // Convert to seconds from window start
       const tripStartSeconds = (tripStartMs - windowStartMs) / 1000;
       const tripEndSeconds = (tripEndMs - windowStartMs) / 1000;
       const tripDurationSeconds = tripEndSeconds - tripStartSeconds;
@@ -481,7 +473,7 @@ function updateTripState(
 const FADE_DURATION_MS = 700;
 
 export const BikeMap = () => {
-  // Animation store - source values only
+  // Animation store
   const speedup = useAnimationStore((s) => s.speedup);
   const animationStartDate = useAnimationStore((s) => s.animationStartDate);
   const time = useAnimationStore((s) => s.currentTime);
@@ -489,6 +481,8 @@ export const BikeMap = () => {
   const advanceTime = useAnimationStore((s) => s.advanceTime);
   const setCurrentTime = useAnimationStore((s) => s.setCurrentTime);
   const resetPlayback = useAnimationStore((s) => s.resetPlayback);
+  const selectedTripId = useAnimationStore((s) => s.selectedTripId);
+  const selectTrip = useAnimationStore((s) => s.selectTrip);
 
   // Derived values (computed at consumption time)
   const windowStartMs = animationStartDate.getTime();
@@ -497,7 +491,6 @@ export const BikeMap = () => {
   const [activeTrips, setActiveTrips] = useState<DeckTrip[]>([]);
   const [tripCount, setTripCount] = useState(0);
   const [animState, setAnimState] = useState<AnimationState>("idle");
-  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [initialViewState, setInitialViewState] = useState<MapViewState>(INITIAL_VIEW_STATE);
 
   const { isPickingLocation, setPickedLocation } = usePickerStore();
@@ -600,59 +593,6 @@ export const BikeMap = () => {
     loadInitial();
   }, [windowStartMs, loadUpcomingRides, animationStartDate, fadeDurationSimSeconds]);
 
-  // Reset and reload when config changes (track source values directly)
-  const configRef = useRef({ windowStartMs, speedup });
-  useEffect(() => {
-    const prev = configRef.current;
-    // Skip if config unchanged (including initial mount)
-    if (prev.windowStartMs === windowStartMs && prev.speedup === speedup) return;
-    configRef.current = { windowStartMs, speedup };
-
-    console.log("Config changed, resetting animation...");
-
-    // Stop current animation
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    lastTimestampRef.current = null;
-
-    // Clear all state
-    tripMapRef.current.clear();
-    loadingChunksRef.current.clear();
-    loadedChunksRef.current.clear();
-    initialLoadDone.current = false;
-    lastChunkRef.current = -1;
-    setActiveTrips([]);
-    setTripCount(0);
-    setAnimState("idle");
-
-    // Reload initial data
-    const loadInitial = async () => {
-      const data = await getTripsForChunk({
-        chunkStart: animationStartDate,
-        chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
-      });
-      const prepared = prepareTripsForDeck({
-        trips: data.trips,
-        windowStartMs,
-        fadeDurationSimSeconds,
-      });
-
-      for (const trip of prepared) {
-        tripMapRef.current.set(trip.id, trip);
-      }
-      loadedChunksRef.current.add(0);
-
-      await loadUpcomingRides(1);
-
-      setActiveTrips(Array.from(tripMapRef.current.values()));
-      setTripCount(tripMapRef.current.size);
-    };
-
-    loadInitial();
-  }, [windowStartMs, speedup, animationStartDate, fadeDurationSimSeconds, loadUpcomingRides]);
-
   // Calculate current real time for clock display
   const currentRealTime = secondsToRealTime(time);
   const currentChunk = getChunkIndex(time);
@@ -754,13 +694,71 @@ export const BikeMap = () => {
     loadInitial();
   }, [windowStartMs, loadUpcomingRides, play, animationStartDate, fadeDurationSimSeconds, resetPlayback]);
 
+  // Reset and reload when config changes (track source values directly)
+  const configRef = useRef({ windowStartMs, speedup });
+  useEffect(() => {
+    const prev = configRef.current;
+    // Skip if config unchanged (including initial mount)
+    if (prev.windowStartMs === windowStartMs && prev.speedup === speedup) return;
+    configRef.current = { windowStartMs, speedup };
+
+    console.log("Config changed, resetting animation...");
+
+    // Stop current animation
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    lastTimestampRef.current = null;
+
+    // Clear all state
+    tripMapRef.current.clear();
+    loadingChunksRef.current.clear();
+    loadedChunksRef.current.clear();
+    initialLoadDone.current = false;
+    lastChunkRef.current = -1;
+    setActiveTrips([]);
+    setTripCount(0);
+    setAnimState("idle");
+
+    // Reload initial data
+    const loadInitial = async () => {
+      const data = await getTripsForChunk({
+        chunkStart: animationStartDate,
+        chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
+      });
+      const prepared = prepareTripsForDeck({
+        trips: data.trips,
+        windowStartMs,
+        fadeDurationSimSeconds,
+      });
+
+      for (const trip of prepared) {
+        tripMapRef.current.set(trip.id, trip);
+      }
+      loadedChunksRef.current.add(0);
+
+      await loadUpcomingRides(1);
+
+      setActiveTrips(Array.from(tripMapRef.current.values()));
+      setTripCount(tripMapRef.current.size);
+
+      // Auto-play if a trip is selected (e.g., from Search)
+      if (selectedTripId) {
+        play();
+      }
+    };
+
+    loadInitial();
+  }, [windowStartMs, speedup, animationStartDate, fadeDurationSimSeconds, loadUpcomingRides, selectedTripId, play]);
+
   // Select a random visible biker
   const selectRandomBiker = useCallback(() => {
     const visibleTrips = activeTrips.filter((t) => t.isVisible);
     if (visibleTrips.length === 0) return;
     const randomTrip = visibleTrips[Math.floor(Math.random() * visibleTrips.length)];
-    setSelectedTripId(randomTrip.id);
-  }, [activeTrips]);
+    selectTrip(randomTrip.id);
+  }, [activeTrips, selectTrip]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -790,6 +788,8 @@ export const BikeMap = () => {
   useEffect(() => {
     if (selectedTripId === null) return;
     const trip = activeTrips.find((t) => t.id === selectedTripId);
+
+    // Only follow if trip exists AND is visible
     if (trip?.isVisible) {
       setInitialViewState((prev) => ({
         ...prev,
@@ -798,11 +798,14 @@ export const BikeMap = () => {
         transitionDuration: 100,
         transitionInterpolator: new LinearInterpolator(["longitude", "latitude"]),
       }));
-    } else {
-      // Selected trip is no longer visible - clear selection
-      setSelectedTripId(null);
     }
-  }, [activeTrips, time, selectedTripId]);
+    // Only clear selection if trip has FINISHED (past visibleEndSeconds)
+    // Don't clear if trip just hasn't started yet
+    else if (trip && time > trip.visibleEndSeconds) {
+      selectTrip(null);
+    }
+    // If trip not found in activeTrips at all, it might be in a future chunk - don't clear yet
+  }, [activeTrips, time, selectedTripId, selectTrip]);
 
   // Memoize selected trip data separately to avoid filtering every frame
   const selectedTripData = useMemo(

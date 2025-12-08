@@ -34,6 +34,7 @@ type Trip = {
 type SearchStep = "station" | "datetime" | "results"
 
 const MAX_RESULTS = 10
+const LOOKBACK_MINUTES = 10
 
 type StationRegion = {
   region: string
@@ -289,7 +290,16 @@ export function Search() {
   }
 
   const handleSelectTrip = (trip: Trip) => {
-    console.log("Selected trip:", trip)
+    const { setAnimationStartDate, selectTrip } = useAnimationStore.getState()
+
+    // Set start time to LOOKBACK_MINUTES before trip starts
+    const startTime = new Date(new Date(trip.startedAt).getTime() - LOOKBACK_MINUTES * 60 * 1000)
+    setAnimationStartDate(startTime)
+
+    // Select the trip for highlighting
+    selectTrip(trip.id)
+
+    // Close dialog
     handleOpenChange(false)
   }
 
