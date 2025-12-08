@@ -585,8 +585,12 @@ export const BikeMap = () => {
       }
       loadedChunksRef.current.add(0);
 
-      // Also load chunk 1 for lookahead
-      await loadUpcomingRides(1);
+      // Load lookahead chunks in parallel (chunks 1 through LOOKAHEAD_CHUNKS + 1)
+      const lookaheadPromises = [];
+      for (let i = 1; i <= LOOKAHEAD_CHUNKS + 1; i++) {
+        lookaheadPromises.push(loadUpcomingRides(i));
+      }
+      await Promise.all(lookaheadPromises);
 
       // Update state for initial render
       setActiveTrips(Array.from(tripMapRef.current.values()));
@@ -685,7 +689,12 @@ export const BikeMap = () => {
       }
       loadedChunksRef.current.add(0);
 
-      await loadUpcomingRides(1);
+      // Load lookahead chunks in parallel
+      const lookaheadPromises = [];
+      for (let i = 1; i <= LOOKAHEAD_CHUNKS + 1; i++) {
+        lookaheadPromises.push(loadUpcomingRides(i));
+      }
+      await Promise.all(lookaheadPromises);
 
       setActiveTrips(Array.from(tripMapRef.current.values()));
       setTripCount(tripMapRef.current.size);
@@ -741,7 +750,12 @@ export const BikeMap = () => {
       }
       loadedChunksRef.current.add(0);
 
-      await loadUpcomingRides(1);
+      // Load lookahead chunks in parallel
+      const lookaheadPromises = [];
+      for (let i = 1; i <= LOOKAHEAD_CHUNKS + 1; i++) {
+        lookaheadPromises.push(loadUpcomingRides(i));
+      }
+      await Promise.all(lookaheadPromises);
 
       setActiveTrips(Array.from(tripMapRef.current.values()));
       setTripCount(tripMapRef.current.size);
