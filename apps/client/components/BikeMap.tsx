@@ -675,6 +675,10 @@ export const BikeMap = () => {
   // Update all trip states in place - GPU handles visibility filtering via DataFilterExtension
   useMemo(() => {
     for (const trip of activeTrips) {
+      if (time < trip.visibleStartSeconds || time > trip.visibleEndSeconds) {
+        trip.isVisible = false;
+        continue;
+      }
       updateTripState(trip, time, fadeDurationSimSeconds);
       // Only set isSelected if there's actually a selection (avoid work when no selection)
       if (selectedTripId !== null) {

@@ -12,7 +12,8 @@ export class TripProcessorClient {
   private loadedBatches = new Set<number>();
   private loadingBatches = new Set<number>();
   private initPromise: Promise<void> | null = null;
-  private batchProcessedCallbacks = new Map<number, () => void>();
+  // Array of callbacks to support multiple concurrent waiters
+  private batchProcessedCallbacks = new Map<number, (() => void)[]>();
 
   constructor(config: { onBatchRequest: (batchId: number) => Promise<RawTrip[]> }) {
     this.onBatchRequest = config.onBatchRequest;
@@ -79,10 +80,12 @@ export class TripProcessorClient {
         this.loadingBatches.delete(msg.batchId);
         console.log(`Batch ${msg.batchId} processed: ${msg.tripCount} trips`);
 
-        // Resolve any waiting callbacks
-        const callback = this.batchProcessedCallbacks.get(msg.batchId);
-        if (callback) {
-          callback();
+        // Resolve ALL waiting callbacks (supports concurrent waiters)
+        const callbacks = this.batchProcessedCallbacks.get(msg.batchId);
+        if (callbacks) {
+          for (const callback of callbacks) {
+            callback();
+          }
           this.batchProcessedCallbacks.delete(msg.batchId);
         }
         break;
@@ -105,14 +108,17 @@ export class TripProcessorClient {
   }
 
   async loadBatch(batchId: number): Promise<void> {
-    if (this.loadedBatches.has(batchId) || this.loadingBatches.has(batchId)) {
-      // If already loading, wait for it
-      if (this.loadingBatches.has(batchId)) {
-        return new Promise((resolve) => {
-          this.batchProcessedCallbacks.set(batchId, resolve);
-        });
-      }
-      return;
+    if (this.loadedBatches.has(batchId)) {
+      return; // Already loaded
+    }
+
+    // If already loading, add to waiters and return promise
+    if (this.loadingBatches.has(batchId)) {
+      return new Promise((resolve) => {
+        const callbacks = this.batchProcessedCallbacks.get(batchId) ?? [];
+        callbacks.push(resolve);
+        this.batchProcessedCallbacks.set(batchId, callbacks);
+      });
     }
 
     this.loadingBatches.add(batchId);
@@ -131,7 +137,9 @@ export class TripProcessorClient {
 
       // Wait for batch to be processed
       return new Promise((resolve) => {
-        this.batchProcessedCallbacks.set(batchId, resolve);
+        const callbacks = this.batchProcessedCallbacks.get(batchId) ?? [];
+        callbacks.push(resolve);
+        this.batchProcessedCallbacks.set(batchId, callbacks);
       });
     } catch (error) {
       console.error(`Failed to load batch ${batchId}:`, error);

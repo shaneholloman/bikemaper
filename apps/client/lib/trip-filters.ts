@@ -1,8 +1,10 @@
 type TripWithRoute = {
   startStationId: string;
   endStationId: string;
-  startedAt: Date;
-  endedAt: Date;
+  // Date when called from main thread, string (ISO) when called from worker
+  // (postMessage serializes Date objects to strings)
+  startedAt: Date | string;
+  endedAt: Date | string;
   routeGeometry: string | null;
   routeDistance: number | null;
 };
