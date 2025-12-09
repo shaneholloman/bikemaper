@@ -4,8 +4,8 @@ import polyline from "@mapbox/polyline";
 import distance from "@turf/distance";
 import { point } from "@turf/helpers";
 import {
-  BATCH_SIZE_SECONDS,
   CHUNK_SIZE_SECONDS,
+  CHUNKS_PER_BATCH,
   EASE_DISTANCE_METERS,
   TRAIL_LENGTH_SECONDS,
 } from "../lib/chunk-config";
@@ -18,6 +18,7 @@ import type {
   UpdateConfigMessage,
   WorkerToMainMessage,
 } from "../lib/trip-processor-protocol";
+import { filterTrips } from "../lib/trip-filters";
 import type { DeckTrip, Phase, RawTrip } from "../lib/trip-types";
 
 // === Worker State ===
@@ -34,32 +35,6 @@ const processedBatches = new Set<number>();
 // === Helper: Post typed message ===
 function post(message: WorkerToMainMessage): void {
   self.postMessage(message);
-}
-
-// === Trip Filtering (copied from trip-filters.ts) ===
-type TripWithRoute = {
-  startStationId: string;
-  endStationId: string;
-  startedAt: string;
-  endedAt: string;
-  routeGeometry: string | null;
-  routeDistance: number | null;
-};
-
-function filterTrips<T extends TripWithRoute>(trips: T[]): T[] {
-  return trips.filter((trip) => {
-    if (!trip.routeGeometry) return false;
-    if (trip.startStationId === trip.endStationId) return false;
-    if (!trip.routeDistance) return false;
-
-    const durationMs =
-      new Date(trip.endedAt).getTime() - new Date(trip.startedAt).getTime();
-    const durationHours = durationMs / (1000 * 60 * 60);
-    const speedKmh = trip.routeDistance / 1000 / durationHours;
-    if (speedKmh <= 2 || speedKmh >= 18) return false;
-
-    return true;
-  });
 }
 
 // === Time Fraction with Easing ===
@@ -276,9 +251,6 @@ function handleUpdateConfig(msg: UpdateConfigMessage): void {
 
 function handleClearBatch(msg: ClearBatchMessage): void {
   const { batchId } = msg;
-  const BATCH_SIZE_SECONDS = 60 * 60; // 1 hour
-  const CHUNKS_PER_BATCH = BATCH_SIZE_SECONDS / CHUNK_SIZE_SECONDS;
-
   const startChunk = batchId * CHUNKS_PER_BATCH;
   const endChunk = startChunk + CHUNKS_PER_BATCH;
 
