@@ -46,42 +46,18 @@ const getTripColor = (d: ProcessedTrip): Color =>
       ? (COLORS.electric)
       : (COLORS.classic);
 
-// =============================================================================
-// Color utilities (gl-matrix style)
-// =============================================================================
-// These utilities mutate arrays in-place to avoid allocations in hot loops.
-// This is safe because deck.gl's accessors (like `getColor`) are called
-// synchronously — deck.gl copies the RGBA values immediately before calling
-// the accessor again for the next item. By the time we mutate the array for
-// item N+1, deck.gl has already copied item N's values into its internal buffer.
-//
-// WARNING: Do NOT store references returned by getBikeHeadColor() for later use.
-// The underlying array will be mutated on the next call.
-// =============================================================================
+// Color utilities
 type Color4 = [number, number, number, number];
-
-const color4 = {
-  /** Copy RGB values and set alpha, writes to `out` */
-  set(out: Color4, rgb: Color, alpha: number): Color4 {
-    out[0] = rgb[0];
-    out[1] = rgb[1];
-    out[2] = rgb[2];
-    out[3] = alpha;
-    return out;
-  },
-  /** Linear interpolate between RGB colors a and b, set alpha, writes to `out` */
-  lerp(out: Color4, a: Color, b: Color, t: number, alpha: number): Color4 {
-    out[0] = a[0] + (b[0] - a[0]) * t;
-    out[1] = a[1] + (b[1] - a[1]) * t;
-    out[2] = a[2] + (b[2] - a[2]) * t;
-    out[3] = alpha;
-    return out;
-  },
-};
-
-// Single output buffer (mutated and reused each call)
-const colorScratch: Color4 = [0, 0, 0, 0];
 const MAX_ALPHA = 0.8 * 255;
+
+const rgba = (rgb: Color, alpha: number): Color4 => [rgb[0], rgb[1], rgb[2], alpha];
+
+const lerpRgba = (a: Color, b: Color, t: number, alpha: number): Color4 => [
+  a[0] + (b[0] - a[0]) * t,
+  a[1] + (b[1] - a[1]) * t,
+  a[2] + (b[2] - a[2]) * t,
+  alpha,
+];
 
 // IconLayer accessors - now use ProcessedTrip directly (no intermediate BikeHead objects)
 const getBikeHeadPosition = (d: ProcessedTrip, { target }: { target: number[] }): [number, number, number] => {
@@ -102,7 +78,7 @@ const getBikeHeadColor = (d: ProcessedTrip): Color4 => {
         : d.currentPhase === "fading-out"
           ? (1 - d.currentPhaseProgress) * MAX_ALPHA
           : MAX_ALPHA;
-    return color4.set(colorScratch, COLORS.selected, alpha);
+    return rgba(COLORS.selected, alpha);
   }
 
   const bikeColor = d.bikeType === "electric_bike" ? COLORS.electric : COLORS.classic;
@@ -110,11 +86,11 @@ const getBikeHeadColor = (d: ProcessedTrip): Color4 => {
   switch (d.currentPhase) {
     case "fading-in":
       // Simultaneous opacity fade-in + color transition
-      return color4.lerp(colorScratch, COLORS.fadeIn, bikeColor, d.currentPhaseProgress, d.currentPhaseProgress * MAX_ALPHA);
+      return lerpRgba(COLORS.fadeIn, bikeColor, d.currentPhaseProgress, d.currentPhaseProgress * MAX_ALPHA);
     case "fading-out":
-      return color4.set(colorScratch, COLORS.fadeOut, (1 - d.currentPhaseProgress) * MAX_ALPHA);
+      return rgba(COLORS.fadeOut, (1 - d.currentPhaseProgress) * MAX_ALPHA);
     default: // moving
-      return color4.set(colorScratch, bikeColor, MAX_ALPHA);
+      return rgba(bikeColor, MAX_ALPHA);
   }
 };
 
