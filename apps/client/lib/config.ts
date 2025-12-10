@@ -2,6 +2,8 @@
 // Animation Defaults
 // =============================================================================
 
+import { Color } from "@deck.gl/core";
+
 // Default animation start date for trip data timeframe
 export const DEFAULT_ANIMATION_START_DATE = new Date("2025-06-04T22:00:00.000Z"); // June 4, 2025 6pm EDT
 
@@ -51,11 +53,11 @@ export const INITIAL_VIEW_STATE = {
 
 export const COLORS = {
   // Trail colors (TripsLayer)
-  classic: [187, 154, 247] as const, // purple
-  electric: [125, 207, 255] as const, // sky blue
-  selected: [255, 165, 0] as const, // orange
+  classic: [187, 154, 247], // purple
+  electric: [125, 207, 255], // sky blue
+  selected: [255, 165, 0], // orange
 
   // Bike head transition colors
-  fadeIn: [115, 255, 140] as const, // green
-  fadeOut: [247, 118, 142] as const, // red/pink
-} as const;
+  fadeIn: [115, 255, 140], // green
+  fadeOut: [247, 118, 142], // red/pink
+} as const satisfies Record<string, Color>;

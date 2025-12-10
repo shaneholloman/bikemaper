@@ -1,6 +1,5 @@
 "use client";
 
-import { useAnimationStore } from "@/lib/stores/animation-store";
 import {
   CHUNK_SIZE_SECONDS,
   CHUNKS_PER_BATCH,
@@ -11,6 +10,7 @@ import {
   TRAIL_LENGTH_SECONDS,
 } from "@/lib/config";
 import { formatTime } from "@/lib/format";
+import { useAnimationStore } from "@/lib/stores/animation-store";
 import { usePickerStore } from "@/lib/stores/location-picker-store";
 import type { Phase, ProcessedTrip } from "@/lib/trip-types";
 import { TripDataService } from "@/services/trip-data-service";
@@ -41,10 +41,10 @@ const getPath = (d: ProcessedTrip) => d.path;
 const getTimestamps = (d: ProcessedTrip) => d.timestamps;
 const getTripColor = (d: ProcessedTrip): Color =>
   d.isSelected
-    ? (COLORS.selected as unknown as Color)
+    ? (COLORS.selected)
     : d.bikeType === "electric_bike"
-      ? (COLORS.electric as unknown as Color)
-      : (COLORS.classic as unknown as Color);
+      ? (COLORS.electric)
+      : (COLORS.classic);
 
 // =============================================================================
 // Color utilities (gl-matrix style)
@@ -59,11 +59,10 @@ const getTripColor = (d: ProcessedTrip): Color =>
 // The underlying array will be mutated on the next call.
 // =============================================================================
 type Color4 = [number, number, number, number];
-type RGB = readonly [number, number, number];
 
 const color4 = {
   /** Copy RGB values and set alpha, writes to `out` */
-  set(out: Color4, rgb: RGB, alpha: number): Color4 {
+  set(out: Color4, rgb: Color, alpha: number): Color4 {
     out[0] = rgb[0];
     out[1] = rgb[1];
     out[2] = rgb[2];
@@ -71,7 +70,7 @@ const color4 = {
     return out;
   },
   /** Linear interpolate between RGB colors a and b, set alpha, writes to `out` */
-  lerp(out: Color4, a: RGB, b: RGB, t: number, alpha: number): Color4 {
+  lerp(out: Color4, a: Color, b: Color, t: number, alpha: number): Color4 {
     out[0] = a[0] + (b[0] - a[0]) * t;
     out[1] = a[1] + (b[1] - a[1]) * t;
     out[2] = a[2] + (b[2] - a[2]) * t;
