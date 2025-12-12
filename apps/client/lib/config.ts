@@ -51,7 +51,7 @@ export const INITIAL_VIEW_STATE = {
 // Graph Configuration
 // =============================================================================
 
-export const GRAPH_WINDOW_SIZE_SECONDS = 7200; // 2-hour rolling window
+export const GRAPH_WINDOW_SIZE_SECONDS = 10800; // 3-hour rolling window
 export const GRAPH_MIN_SCALE = 100; // Minimum Y-axis scale (avoid jitter)
 
 // =============================================================================

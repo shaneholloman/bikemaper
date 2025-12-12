@@ -25,7 +25,7 @@ import { Pause, Play, Shuffle } from "lucide-react";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap, Marker } from "react-map-gl/mapbox";
-import ActiveBikesGraph from "./ActiveBikesGraph";
+import { ActiveRidesPanel } from "./ActiveRidesPanel";
 import { SelectedTripPanel } from "./SelectedTripPanel";
 import { TimeDisplay } from "./TimeDisplay";
 
@@ -470,14 +470,14 @@ export const BikeMap = () => {
 
           const trip = tripMapRef.current.get(selectedId);
 
-          // Clear selection if trip ended or no longer in map
-          if (!trip || state.currentTime > trip.visibleEndSeconds) {
+          // Clear selection if trip ended (but not if trip hasn't loaded yet)
+          if (trip && state.currentTime > trip.visibleEndSeconds) {
             state.selectTrip(null);
             return;
           }
 
           // Follow if visible
-          if (trip.isVisible) {
+          if (trip?.isVisible) {
             setInitialViewState((prev) => ({
               ...prev,
               longitude: trip.currentPosition[0],
@@ -849,14 +849,7 @@ export const BikeMap = () => {
 
         {/* Stats - right */}
         <div className="pointer-events-none">
-          <div className="bg-black/45 backdrop-blur-md text-white/90 px-3 py-2 rounded-xl border border-white/10 shadow-[0_0_24px_rgba(0,0,0,0.6)] min-w-[120px]">
-            <div className="text-[10px] uppercase tracking-widest text-white/60">Active Rides</div>
-            <div className="mt-0.5 text-xl font-semibold tabular-nums">{tripCount.toLocaleString()}</div>
-            <div ref={fpsRef} className="mt-0.5 text-[10px] tracking-wide text-white/50">-- FPS</div>
-            <div className="mt-2">
-              <ActiveBikesGraph data={graphData} currentTime={time} />
-            </div>
-          </div>
+          <ActiveRidesPanel ref={fpsRef} tripCount={tripCount} graphData={graphData} currentTime={time} />
           {selectedTripInfo && <SelectedTripPanel info={selectedTripInfo} />}
         </div>
       </div>
