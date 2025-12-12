@@ -272,7 +272,6 @@ export const BikeMap = () => {
   const lastTimestampRef = useRef<number | null>(null);
   const fpsRef = useRef<HTMLDivElement>(null);
   const smoothedFpsRef = useRef(60);
-  const lastFpsUpdateRef = useRef(0);
   const tripMapRef = useRef<Map<string, ProcessedTrip>>(new Map());
   const loadingChunksRef = useRef<Set<number>>(new Set());
   const loadedChunksRef = useRef<Set<number>>(new Set());
@@ -280,6 +279,7 @@ export const BikeMap = () => {
   const lastBatchRef = useRef(-1);
   const serviceRef = useRef<TripDataService | null>(null);
   const graphSamplerRef = useRef(createThrottledSampler({ intervalMs: 60 }));
+  const fpsSamplerRef = useRef(createThrottledSampler({ intervalMs: 100 }));
 
   // Convert seconds to real time (ms) for clock display
   const secondsToRealTime = useCallback(
@@ -415,6 +415,7 @@ export const BikeMap = () => {
     lastChunkRef.current = 0;
     lastTimestampRef.current = null;
     graphSamplerRef.current.reset();
+    fpsSamplerRef.current.reset();
     setGraphData([]);
 
     const tick = (timestamp: number) => {
@@ -424,10 +425,11 @@ export const BikeMap = () => {
         advanceTime(deltaSeconds * speedup);
         const currentFps = 1000 / deltaMs;
         smoothedFpsRef.current = smoothedFpsRef.current * 0.9 + currentFps * 0.1;
-        if (fpsRef.current && timestamp - lastFpsUpdateRef.current >= 100) {
-          fpsRef.current.textContent = `${Math.round(smoothedFpsRef.current)} FPS`;
-          lastFpsUpdateRef.current = timestamp;
-        }
+        fpsSamplerRef.current.sample(() => {
+          if (fpsRef.current) {
+            fpsRef.current.textContent = `${Math.round(smoothedFpsRef.current)} FPS`;
+          }
+        });
 
         // Sample graph data at intervals
         graphSamplerRef.current.sample(() => {
@@ -472,6 +474,7 @@ export const BikeMap = () => {
     lastChunkRef.current = -1;
     lastBatchRef.current = -1;
     graphSamplerRef.current.reset();
+    fpsSamplerRef.current.reset();
     setActiveTrips([]);
     setTripCount(0);
     setAnimState("idle");
