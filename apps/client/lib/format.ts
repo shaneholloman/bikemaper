@@ -2,11 +2,15 @@
 // Distance Formatting
 // =============================================================================
 
+import { convertLength } from "@turf/helpers";
+
 export function formatDistance(meters: number): string {
-  if (meters < 1000) {
-    return `${Math.round(meters)}m`;
+  const feet = convertLength(meters, "meters", "feet");
+  if (feet < 1000) {
+    return `${Math.round(feet)} ft`;
   }
-  return `${(meters / 1000).toFixed(1)}km`;
+  const miles = convertLength(meters, "meters", "miles");
+  return `${miles.toFixed(1)} mi`;
 }
 
 // =============================================================================
