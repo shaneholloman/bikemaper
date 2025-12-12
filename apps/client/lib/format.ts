@@ -62,3 +62,25 @@ export function formatTime(ms: number): string {
     timeZone: "America/New_York",
   });
 }
+
+// Format just the time portion (NYC timezone)
+export function formatTimeOnly(ms: number): string {
+  return new Date(ms).toLocaleString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+    timeZone: "America/New_York",
+  });
+}
+
+// Format just the date portion (NYC timezone)
+export function formatDateShort(ms: number): string {
+  return new Date(ms).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/New_York",
+  });
+}

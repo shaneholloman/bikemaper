@@ -707,7 +707,7 @@ export const BikeMap = () => {
         {/* Stats - right */}
         <div className="pointer-events-none">
           <div className="bg-black/45 backdrop-blur-md text-white/90 px-3 py-2 rounded-xl border border-white/10 shadow-[0_0_24px_rgba(0,0,0,0.6)] min-w-[120px]">
-            <div className="text-[10px] uppercase tracking-widest text-white/60">Active Trips</div>
+            <div className="text-[10px] uppercase tracking-widest text-white/60">Active Rides</div>
             <div className="mt-0.5 text-xl font-semibold tabular-nums">{tripCount.toLocaleString()}</div>
             <div ref={fpsRef} className="mt-0.5 text-[10px] tracking-wide text-white/50">-- FPS</div>
             <div className="mt-2">
