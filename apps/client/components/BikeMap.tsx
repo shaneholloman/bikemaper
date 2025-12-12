@@ -10,7 +10,6 @@ import {
   PREFETCH_THRESHOLD_CHUNKS,
   TRAIL_LENGTH_SECONDS,
 } from "@/lib/config";
-import { formatTime } from "@/lib/format";
 import { createThrottledSampler } from "@/lib/misc";
 import { useAnimationStore } from "@/lib/stores/animation-store";
 import { usePickerStore } from "@/lib/stores/location-picker-store";
@@ -24,6 +23,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap, Marker } from "react-map-gl/mapbox";
 import ActiveBikesGraph from "./ActiveBikesGraph";
+import { TimeDisplay } from "./TimeDisplay";
 
 import type { Color, MapViewState } from "@deck.gl/core";
 import { LinearInterpolator } from "@deck.gl/core";
@@ -281,12 +281,6 @@ export const BikeMap = () => {
   const graphSamplerRef = useRef(createThrottledSampler({ intervalMs: 60 }));
   const fpsSamplerRef = useRef(createThrottledSampler({ intervalMs: 100 }));
 
-  // Convert seconds to real time (ms) for clock display
-  const secondsToRealTime = useCallback(
-    (seconds: number) => windowStartMs + seconds * 1000,
-    [windowStartMs]
-  );
-
   // Get chunk index from simulation time (seconds)
   const getChunkIndex = useCallback(
     (timeSeconds: number) => Math.floor(timeSeconds / CHUNK_SIZE_SECONDS),
@@ -364,8 +358,6 @@ export const BikeMap = () => {
     };
   }, [windowStartMs, animationStartDate, fadeDurationSimSeconds]);
 
-  // Calculate current real time for clock display
-  const currentRealTime = secondsToRealTime(time);
   const currentChunk = getChunkIndex(time);
 
   // On chunk change: load chunk from worker, prefetch next batch, cleanup old trips
@@ -710,11 +702,7 @@ export const BikeMap = () => {
         </div>
 
         {/* Time - center */}
-        <div className="pointer-events-none">
-          <div className="bg-black/45 backdrop-blur-md text-white/90 text-xs px-3 py-1.5 rounded-full border border-white/10 tracking-wide font-mono shadow-[0_0_24px_rgba(0,0,0,0.6)]">
-            {formatTime(currentRealTime)}
-          </div>
-        </div>
+        <TimeDisplay simulationTime={time} startDate={animationStartDate} />
 
         {/* Stats - right */}
         <div className="pointer-events-none">
