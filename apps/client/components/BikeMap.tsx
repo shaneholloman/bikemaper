@@ -57,15 +57,6 @@ const getTripColor = (d: ProcessedTrip): Color =>
 type Color4 = [number, number, number, number];
 const MAX_ALPHA = 0.8 * 255;
 
-const rgba = (rgb: Color, alpha: number): Color4 => [rgb[0], rgb[1], rgb[2], alpha];
-
-const lerpRgba = (a: Color, b: Color, t: number, alpha: number): Color4 => [
-  a[0] + (b[0] - a[0]) * t,
-  a[1] + (b[1] - a[1]) * t,
-  a[2] + (b[2] - a[2]) * t,
-  alpha,
-];
-
 // IconLayer accessors - now use ProcessedTrip directly (no intermediate BikeHead objects)
 const getBikeHeadPosition = (d: ProcessedTrip, { target }: { target: number[] }): [number, number, number] => {
   target[0] = d.currentPosition[0];
@@ -74,23 +65,7 @@ const getBikeHeadPosition = (d: ProcessedTrip, { target }: { target: number[] })
   return target as [number, number, number];
 };
 const getBikeHeadAngle = (d: ProcessedTrip) => -d.currentBearing;
-const getBikeHeadIcon = () => "arrow";
-const getBikeHeadSize = () => 9;
-const getBikeHeadColor = (d: ProcessedTrip): Color4 => {
-  const bikeColor = d.bikeType === "electric_bike" ? COLORS.electric : COLORS.classic;
-
-  // All bikes (selected or not) use the same color transitions
-  switch (d.currentPhase) {
-    case "fading-in":
-      // Simultaneous opacity fade-in + color transition (green -> bike color)
-      return lerpRgba(COLORS.fadeIn, bikeColor, d.currentPhaseProgress, d.currentPhaseProgress * MAX_ALPHA);
-    case "fading-out":
-      // Fade out to red
-      return rgba(COLORS.fadeOut, (1 - d.currentPhaseProgress) * MAX_ALPHA);
-    default: // moving
-      return rgba(bikeColor, MAX_ALPHA);
-  }
-};
+const getBikeHeadColor = (d: ProcessedTrip): Color4 => d.currentHeadColor;
 
 const ICON_MAPPING = {
   arrow: { x: 0, y: 0, width: 24, height: 24, anchorX: 12, anchorY: 12, mask: true },
@@ -98,20 +73,7 @@ const ICON_MAPPING = {
 
 // Selected path color with fade in/out based on phase
 const PATH_OPACITY = 180;
-const getSelectedPathColor = (d: ProcessedTrip): Color4 => {
-  const bikeColor = d.bikeType === "electric_bike" ? COLORS.electric : COLORS.classic;
-
-  switch (d.currentPhase) {
-    case "fading-in":
-      // Green -> bike color transition with opacity fade
-      return lerpRgba(COLORS.fadeIn, bikeColor, d.currentPhaseProgress, d.currentPhaseProgress * PATH_OPACITY);
-    case "fading-out":
-      // Fade out to red
-      return rgba(COLORS.fadeOut, (1 - d.currentPhaseProgress) * PATH_OPACITY);
-    default: // moving
-      return rgba(bikeColor, PATH_OPACITY);
-  }
-};
+const getSelectedPathColor = (d: ProcessedTrip): Color4 => d.currentPathColor;
 
 // DataFilterExtension for GPU-based visibility filtering
 // filterSize: 2 means we filter on 2 values [visibleStartSeconds, visibleEndSeconds]
@@ -175,6 +137,7 @@ function updateTripState(
     trip.currentPhase = phase;
     trip.currentPhaseProgress = phaseProgress;
     trip.isVisible = true;
+    computeTripColors(trip);
     return true;
   }
 
@@ -185,6 +148,7 @@ function updateTripState(
     trip.currentPhase = phase;
     trip.currentPhaseProgress = phaseProgress;
     trip.isVisible = true;
+    computeTripColors(trip);
     return true;
   }
 
@@ -250,8 +214,53 @@ function updateTripState(
   trip.currentPhase = phase;
   trip.currentPhaseProgress = phaseProgress;
   trip.isVisible = true;
+  computeTripColors(trip);
 
   return true;
+}
+
+// Compute colors in-place based on current phase and progress
+function computeTripColors(trip: ProcessedTrip): void {
+  const bikeColor = trip.bikeType === "electric_bike" ? COLORS.electric : COLORS.classic;
+  const phase = trip.currentPhase;
+  const progress = trip.currentPhaseProgress;
+
+  let r: number, g: number, b: number;
+  let headAlpha: number, pathAlpha: number;
+
+  switch (phase) {
+    case "fading-in":
+      // Lerp from fadeIn to bikeColor
+      r = COLORS.fadeIn[0] + (bikeColor[0] - COLORS.fadeIn[0]) * progress;
+      g = COLORS.fadeIn[1] + (bikeColor[1] - COLORS.fadeIn[1]) * progress;
+      b = COLORS.fadeIn[2] + (bikeColor[2] - COLORS.fadeIn[2]) * progress;
+      headAlpha = progress * MAX_ALPHA;
+      pathAlpha = progress * PATH_OPACITY;
+      break;
+    case "fading-out":
+      r = COLORS.fadeOut[0];
+      g = COLORS.fadeOut[1];
+      b = COLORS.fadeOut[2];
+      headAlpha = (1 - progress) * MAX_ALPHA;
+      pathAlpha = (1 - progress) * PATH_OPACITY;
+      break;
+    default: // moving
+      r = bikeColor[0];
+      g = bikeColor[1];
+      b = bikeColor[2];
+      headAlpha = MAX_ALPHA;
+      pathAlpha = PATH_OPACITY;
+  }
+
+  trip.currentHeadColor[0] = r;
+  trip.currentHeadColor[1] = g;
+  trip.currentHeadColor[2] = b;
+  trip.currentHeadColor[3] = headAlpha;
+
+  trip.currentPathColor[0] = r;
+  trip.currentPathColor[1] = g;
+  trip.currentPathColor[2] = b;
+  trip.currentPathColor[3] = pathAlpha;
 }
 
 // Cached interpolator for camera follow (avoid allocating new object every frame)
@@ -688,8 +697,8 @@ export const BikeMap = () => {
         opacity: hasSelection ? 0.1 : 0.8,
         getPosition: getBikeHeadPosition,
         getAngle: getBikeHeadAngle,
-        getIcon: getBikeHeadIcon,
-        getSize: getBikeHeadSize,
+        getIcon: () => "arrow",
+        getSize: 9,
         getColor: getBikeHeadColor,
         iconAtlas: ARROW_SVG,
         iconMapping: ICON_MAPPING,
@@ -748,8 +757,8 @@ export const BikeMap = () => {
               opacity: 1,
               getPosition: getBikeHeadPosition,
               getAngle: getBikeHeadAngle,
-              getIcon: getBikeHeadIcon,
-              getSize: getBikeHeadSize,
+              getIcon: () => "arrow",
+              getSize: 9,
               getColor: getBikeHeadColor,
               iconAtlas: ARROW_SVG,
               iconMapping: ICON_MAPPING,

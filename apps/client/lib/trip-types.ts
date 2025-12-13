@@ -53,6 +53,8 @@ export type ProcessedTrip = {
   currentPhaseProgress: number;
   isVisible: boolean;
   isSelected: boolean;
+  currentHeadColor: [number, number, number, number];
+  currentPathColor: [number, number, number, number];
   // Metadata for UI display
   memberCasual: string;
   startStationId: string;
