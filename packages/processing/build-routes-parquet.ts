@@ -299,6 +299,7 @@ async function main() {
   for (const p of rawPairs) {
     const key = `${p.startStationId}->${p.endStationId}`;
     if (existingRoutes.has(key)) continue; // Skip already cached
+    if (p.startStationId === p.endStationId) continue; // Skip same-station trips
 
     const start = stationMap.get(p.startStationId);
     const end = stationMap.get(p.endStationId);
