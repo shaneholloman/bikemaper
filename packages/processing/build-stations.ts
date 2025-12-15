@@ -127,12 +127,6 @@ function checkStationCoordVariance(
     coord2_lng: number;
   }>
 ): void {
-  if (coordVariance.length === 0) return;
-
-  console.warn(
-    "\nStations with multiple coordinates (using most common; top 20 by variance count):"
-  );
-
   const tooFar: Array<{ id: string; name: string; distance: number }> = [];
 
   for (const row of coordVariance) {
@@ -141,10 +135,6 @@ function checkStationCoordVariance(
       row.coord1_lng,
       row.coord2_lat,
       row.coord2_lng
-    );
-
-    console.warn(
-      `- id="${row.id}" name="${row.name}" distance=${distance.toFixed(1)}m points=${row.point_count} distinct_coords@6dp=${row.distinct_coords_6dp}`
     );
 
     if (distance > WARN_COORD_VARIANCE_METERS) {
