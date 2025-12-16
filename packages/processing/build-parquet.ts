@@ -1,31 +1,19 @@
-/**
- * Builds Parquet files from Citi Bike CSV trip data.
- *
- * CSV Assumptions:
- * - Located in ../../data/ matching *citibike-tripdata*.csv
- * - Required columns (exact names):
- *   ride_id, rideable_type, started_at, ended_at,
- *   start_station_name, start_station_id, end_station_name, end_station_id,
- *   start_lat, start_lng, end_lat, end_lng, member_casual
- *
- * Validation (warns and drops rows with):
- * - NULL in any required field
- * - Unparseable timestamp or coordinate
- * - Invalid rideable_type (must be 'classic_bike' or 'electric_bike')
- * - Invalid member_casual (must be 'member' or 'casual')
- * - ended_at < started_at (negative duration)
- * - Duplicate ride_id
- */
+// Builds Parquet files from Citi Bike CSV trip data with embedded route geometries.
+//
+// Prerequisites:
+// - CSV files in data/2025/**/*.csv
+// - output/routes.db (from build-routes.ts)
+//
+// Output:
+// - output/trips/2025.parquet
 import { DuckDBConnection } from "@duckdb/node-api";
-import { execSync } from "child_process";
 import fs from "fs";
 import { globSync } from "glob";
 import path from "path";
-import { formatHumanReadableBytes } from "../../apps/client/lib/utils";
+import { csvGlob, dataDir, formatHumanReadableBytes, gitRoot } from "./utils";
 
-const gitRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
-const dataDir = path.join(gitRoot, "data");
 const outputDir = path.join(gitRoot, "packages/processing/output");
+const routesDbPath = path.join(outputDir, "routes.db");
 
 type ValidationResult = {
   total_rows: bigint;
@@ -109,9 +97,14 @@ async function main() {
 
   const connection = await DuckDBConnection.create();
 
+  // Configure DuckDB for large workloads - spill to disk instead of using 40GB RAM
+  const tempDir = path.join(outputDir, "duckdb_tmp");
+  fs.mkdirSync(tempDir, { recursive: true });
+  await connection.run(`SET temp_directory = '${tempDir}'`);
+  await connection.run(`SET memory_limit = '32GB'`);
+  await connection.run(`SET preserve_insertion_order = false`);
+
   // 1. Load ALL data without filtering (validation will catch issues)
-  // Match all CSVs under `data/2025/` (including nested month folders)
-  const csvGlob = path.join(dataDir, "2025/**/*.csv");
   console.log(`\nReading CSVs matching: ${csvGlob}`);
 
   // Expand glob so we can report inputs deterministically
@@ -218,14 +211,30 @@ async function main() {
   // Print validation warnings
   printValidationWarnings(validation);
 
-  // 3. Export trips to Parquet (filtered and deduplicated)
-  console.log("\nExporting trips to Parquet...");
+  // 3. Load routes from SQLite into DuckDB
+  console.log("\nLoading routes from SQLite...");
+  if (!fs.existsSync(routesDbPath)) {
+    throw new Error(`routes.db not found at ${routesDbPath}. Run build-routes.ts first.`);
+  }
+  await connection.run(`
+    INSTALL sqlite;
+    LOAD sqlite;
+  `);
+  await connection.run(`
+    CREATE TABLE routes AS
+    SELECT * FROM sqlite_scan('${routesDbPath}', 'routes')
+  `);
+  const routeCountReader = await connection.runAndReadAll(`SELECT COUNT(*) as count FROM routes`);
+  const routeCount = Number((routeCountReader.getRowObjects()[0] as { count: bigint }).count);
+  console.log(`  ${routeCount} routes loaded`);
+
+  // 4. Create trips table with routes via SQL JOIN (no JS iteration!)
+  console.log("\nJoining trips with routes...");
   const parquetPath = path.join(outputDir, "trips/2025.parquet");
 
-  // Filter condition for valid rows
   // NYC bounding box
   const NYC_BOUNDS = {
-    minLat: 40.3,   
+    minLat: 40.3,
     maxLat: 41.2,
     minLng: -74.5,
     maxLng: -73.5,
@@ -252,47 +261,86 @@ async function main() {
     AND end_lng BETWEEN ${NYC_BOUNDS.minLng} AND ${NYC_BOUNDS.maxLng}
   `;
 
+  // Step 1: Filter valid rows
+  console.log("  Step 1: Filtering valid rows...");
+  let stepStart = Date.now();
   await connection.run(`
-    COPY (
-      SELECT
-        ride_id as id,
-        start_station_id as startStationId,
-        start_station_name as startStationName,
-        end_station_id as endStationId,
-        end_station_name as endStationName,
-        started_at as startedAt,
-        ended_at as endedAt,
-        rideable_type as bikeType,
-        member_casual as memberCasual,
-        start_lat as startLat,
-        start_lng as startLng,
-        end_lat as endLat,
-        end_lng as endLng
-      FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY ride_id ORDER BY started_at) as rn
-        FROM raw
-        WHERE ${validRowFilter}
-      )
-      WHERE rn = 1
-      ORDER BY started_at
-    ) TO '${parquetPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
+    CREATE TABLE filtered AS
+    SELECT * FROM raw WHERE ${validRowFilter}
+  `);
+  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
+
+  // Step 2: Deduplicate by ride_id
+  console.log("  Step 2: Deduplicating by ride_id...");
+  stepStart = Date.now();
+  await connection.run(`
+    CREATE TABLE deduped AS
+    SELECT DISTINCT ON (ride_id) * FROM filtered
+  `);
+  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
+
+  // Step 3: JOIN with routes
+  console.log("  Step 3: Joining with routes...");
+  stepStart = Date.now();
+  await connection.run(`
+    CREATE TABLE joined AS
+    SELECT
+      t.ride_id as id,
+      t.start_station_id as startStationId,
+      t.end_station_id as endStationId,
+      t.started_at as startedAt,
+      t.ended_at as endedAt,
+      t.rideable_type as bikeType,
+      t.member_casual as memberCasual,
+      t.start_lat as startLat,
+      t.start_lng as startLng,
+      t.end_lat as endLat,
+      t.end_lng as endLng,
+      r.geometry as routeGeometry,
+      r.distance as routeDistance
+    FROM deduped t
+    LEFT JOIN routes r
+      ON t.start_station_id = r.start_station_id
+      AND t.end_station_id = r.end_station_id
+  `);
+  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
+
+  // Step 4: Sort by date (enables row group pruning for date-range queries)
+  console.log("  Step 4: Sorting by startedAt...");
+  stepStart = Date.now();
+  await connection.run(`
+    CREATE TABLE trips AS
+    SELECT * FROM joined ORDER BY startedAt
+  `);
+  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
+
+  // Get stats
+  const statsReader = await connection.runAndReadAll(`
+    SELECT
+      COUNT(*) as total,
+      COUNT(routeGeometry) as with_route
+    FROM trips
+  `);
+  const stats = statsReader.getRowObjects()[0] as { total: bigint; with_route: bigint };
+  const tripCount = Number(stats.total);
+  const withRoute = Number(stats.with_route);
+  const withoutRoute = tripCount - withRoute;
+  console.log(`  ${tripCount} trips created (${withRoute} with routes, ${withoutRoute} without)`);
+
+  // 5. Export to parquet
+  console.log("\nExporting to Parquet...");
+  await connection.run(`
+    COPY trips TO '${parquetPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
   `);
 
-  // Count exported rows and report data loss
-  const exportedReader = await connection.runAndReadAll(
-    `SELECT COUNT(*) as count FROM '${parquetPath}'`
-  );
-  const exportedCount = Number(
-    (exportedReader.getRowObjects()[0] as { count: bigint }).count
-  );
-  const droppedCount = Number(validation.total_rows) - exportedCount;
+  const droppedCount = Number(validation.total_rows) - tripCount;
   const droppedPct = ((droppedCount / Number(validation.total_rows)) * 100).toFixed(2);
-  console.warn(`\nTotal data loss: ${droppedCount} rows (${droppedPct}%) dropped`);
+  console.warn(`Total data loss: ${droppedCount} rows (${droppedPct}%) dropped`);
 
   const parquetStats = fs.statSync(parquetPath);
-  console.log(
-    `Parquet file written: ${parquetPath} (${(parquetStats.size / 1024 / 1024).toFixed(1)} MB)`
-  );
+  console.log(`Parquet file written: ${parquetPath} (${(parquetStats.size / 1024 / 1024).toFixed(1)} MB)`);
+  console.log(`  ${withRoute} trips with routes (${((withRoute / tripCount) * 100).toFixed(1)}%)`);
+  console.log(`  ${withoutRoute} trips without routes`);
 
   connection.closeSync();
 

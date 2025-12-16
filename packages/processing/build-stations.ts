@@ -1,34 +1,19 @@
 import { DuckDBConnection } from "@duckdb/node-api";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point } from "@turf/helpers";
-import { execSync } from "child_process";
 import fs from "fs";
 import type { Feature, FeatureCollection, Polygon } from "geojson";
 import path from "path";
+import { csvGlob, dataDir, gitRoot } from "./utils";
 
-const gitRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
-
-/**
- * Derive station data from trips Parquet + geocode with neighborhood boundaries.
- *
- * Input:
- * - `output/trips/*.parquet` (relative to this package cwd)
- *   Requires trips parquet to include:
- *   - startStationId, startStationName, startLat, startLng
- *   - endStationId, endStationName, endLat, endLng
- * - `../../data/d085e2f8d0b54d4590b1e7d1f35594c1pediacitiesnycneighborhoods.geojson`
- *   NYC neighborhood boundary polygons with { neighborhood, borough } properties.
- *
- * Output:
- * - `output/stations.json` with shape:
- *   Array<{ name, ids, latitude, longitude, borough, neighborhood }>
- *
- * Notes:
- * - We intentionally merge stations by NAME for search UX.
- * - Borough/neighborhood derived via point-in-polygon lookup.
- * - NJ stations use simple bounding box heuristic (west of Hudson).
- * - This is a derived artifact; regenerate whenever trips parquet changes.
- */
+// Derive station data from raw CSV files + geocode with neighborhood boundaries.
+//
+// Input:
+// - data/2025/**/*.csv (raw Citi Bike trip CSVs)
+// - data/d085e2f8d0b54d4590b1e7d1f35594c1pediacitiesnycneighborhoods.geojson
+//
+// Output:
+// - apps/client/public/stations.json
 
 type NeighborhoodProperties = {
   neighborhood: string;
@@ -118,54 +103,34 @@ function haversineMeters(
 
 const WARN_COORD_VARIANCE_METERS = 200;
 
-function checkStationCoordVariance(
-  coordVariance: Array<{
+function checkStationCoordDeviation(
+  stations: Array<{
     id: string;
     name: string;
     point_count: bigint;
-    distinct_coords_6dp: bigint;
-    coord1_lat: number;
-    coord1_lng: number;
-    coord2_lat: number;
-    coord2_lng: number;
+    max_deviation_m: number;
   }>
 ): void {
-  const tooFar: Array<{ id: string; name: string; distance: number }> = [];
-
-  for (const row of coordVariance) {
-    const distance = haversineMeters(
-      row.coord1_lat,
-      row.coord1_lng,
-      row.coord2_lat,
-      row.coord2_lng
-    );
-
-    if (distance > WARN_COORD_VARIANCE_METERS) {
-      tooFar.push({ id: row.id, name: row.name, distance });
-    }
-  }
+  const tooFar = stations.filter((s) => s.max_deviation_m > WARN_COORD_VARIANCE_METERS);
 
   if (tooFar.length > 0) {
     console.warn(
-      `\n⚠️  ${tooFar.length} station(s) have coordinate variance > ${WARN_COORD_VARIANCE_METERS}m:\n` +
-        tooFar.map((s) => `  - ${s.id} "${s.name}" (${s.distance.toFixed(1)}m)`).join("\n")
+      `\n⚠️  ${tooFar.length} station ID(s) have points > ${WARN_COORD_VARIANCE_METERS}m from median:\n` +
+        tooFar.map((s) => `  - ${s.id} "${s.name}" (max ${s.max_deviation_m.toFixed(1)}m, ${s.point_count} points)`).join("\n")
     );
   }
 }
 
 async function main() {
-  const outputDir = path.join(gitRoot, "packages/processing/output");
-  const dataDir = path.join(gitRoot, "data");
   const clientPublicDir = path.join(gitRoot, "apps/client/public");
-  const tripsGlob = path.join(outputDir, "trips/*.parquet");
   const stationsPath = path.join(clientPublicDir, "stations.json");
   const geoJsonPath = path.join(
     dataDir,
     "d085e2f8d0b54d4590b1e7d1f35594c1pediacitiesnycneighborhoods.geojson"
   );
 
-  console.log("Building stations.json from trips parquet...");
-  console.log(`Trips glob: ${tripsGlob}`);
+  console.log("Building stations.json from CSV files...");
+  console.log(`CSV glob: ${csvGlob}`);
   console.log(`GeoJSON: ${geoJsonPath}`);
   console.log(`Output: ${stationsPath}`);
 
@@ -180,22 +145,32 @@ async function main() {
 
   const connection = await DuckDBConnection.create();
 
-  // Diagnostics: show station IDs whose coordinates vary (these get averaged downstream).
-  const stationCoordVarianceReader = await connection.runAndReadAll(`
+  // Diagnostics: show station IDs where any point deviates significantly from the median.
+  const stationDeviationReader = await connection.runAndReadAll(`
     WITH station_points AS (
       SELECT
-        startStationId AS id,
-        startStationName AS name,
-        startLat AS lat,
-        startLng AS lng
-      FROM read_parquet('${tripsGlob}')
+        start_station_id AS id,
+        start_station_name AS name,
+        start_lat AS lat,
+        start_lng AS lng
+      FROM read_csv_auto('${csvGlob}')
       UNION ALL
       SELECT
-        endStationId AS id,
-        endStationName AS name,
-        endLat AS lat,
-        endLng AS lng
-      FROM read_parquet('${tripsGlob}')
+        end_station_id AS id,
+        end_station_name AS name,
+        end_lat AS lat,
+        end_lng AS lng
+      FROM read_csv_auto('${csvGlob}')
+    ),
+    station_median AS (
+      SELECT
+        id,
+        MEDIAN(lat) AS median_lat,
+        MEDIAN(lng) AS median_lng,
+        COUNT(*) AS point_count
+      FROM station_points
+      WHERE id IS NOT NULL AND lat IS NOT NULL AND lng IS NOT NULL
+      GROUP BY id
     ),
     station_name AS (
       -- Pick the most frequently observed name for each station id
@@ -212,95 +187,66 @@ async function main() {
       )
       WHERE rn = 1
     ),
-    coord_counts AS (
+    point_deviations AS (
       SELECT
-        id,
-        ROUND(lat, 6) AS lat6,
-        ROUND(lng, 6) AS lng6,
-        COUNT(*) AS cnt
-      FROM station_points
-      WHERE id IS NOT NULL AND lat IS NOT NULL AND lng IS NOT NULL
-      GROUP BY id, lat6, lng6
-    ),
-    ranked AS (
-      SELECT
-        id,
-        lat6,
-        lng6,
-        cnt,
-        ROW_NUMBER() OVER (PARTITION BY id ORDER BY cnt DESC, lat6, lng6) AS rn,
-        SUM(cnt) OVER (PARTITION BY id) AS point_count,
-        COUNT(*) OVER (PARTITION BY id) AS distinct_coords_6dp
-      FROM coord_counts
+        sp.id,
+        sm.point_count,
+        -- Haversine approximation for small distances
+        6371000 * SQRT(
+          POWER(RADIANS(sp.lat - sm.median_lat), 2) +
+          POWER(COS(RADIANS(sm.median_lat)) * RADIANS(sp.lng - sm.median_lng), 2)
+        ) AS distance_m
+      FROM station_points sp
+      JOIN station_median sm ON sp.id = sm.id
+      WHERE sp.id IS NOT NULL AND sp.lat IS NOT NULL AND sp.lng IS NOT NULL
     )
     SELECT
-      id,
-      COALESCE(MAX(station_name.name), '') AS name,
-      MAX(point_count) AS point_count,
-      MAX(distinct_coords_6dp) AS distinct_coords_6dp,
-      MAX(CASE WHEN rn = 1 THEN lat6 END) AS coord1_lat,
-      MAX(CASE WHEN rn = 1 THEN lng6 END) AS coord1_lng,
-      MAX(CASE WHEN rn = 2 THEN lat6 END) AS coord2_lat,
-      MAX(CASE WHEN rn = 2 THEN lng6 END) AS coord2_lng
-    FROM ranked
-    LEFT JOIN station_name USING (id)
-    GROUP BY id
-    HAVING MAX(distinct_coords_6dp) > 1
-    ORDER BY MAX(distinct_coords_6dp) DESC, MAX(point_count) DESC
+      pd.id,
+      COALESCE(sn.name, '') AS name,
+      MAX(pd.point_count) AS point_count,
+      MAX(pd.distance_m) AS max_deviation_m
+    FROM point_deviations pd
+    LEFT JOIN station_name sn ON pd.id = sn.id
+    GROUP BY pd.id, sn.name
+    HAVING MAX(pd.distance_m) > ${WARN_COORD_VARIANCE_METERS}
+    ORDER BY MAX(pd.distance_m) DESC
     LIMIT 20
   `);
 
-  checkStationCoordVariance(
-    stationCoordVarianceReader.getRowObjectsJson() as unknown as Array<{
+  checkStationCoordDeviation(
+    stationDeviationReader.getRowObjectsJson() as unknown as Array<{
       id: string;
       name: string;
       point_count: bigint;
-      distinct_coords_6dp: bigint;
-      coord1_lat: number;
-      coord1_lng: number;
-      coord2_lat: number;
-      coord2_lng: number;
+      max_deviation_m: number;
     }>
   );
 
   const stationsReader = await connection.runAndReadAll(`
     WITH station_points AS (
       SELECT
-        startStationId AS id,
-        startStationName AS name,
-        startLat AS lat,
-        startLng AS lng
-      FROM read_parquet('${tripsGlob}')
+        start_station_id AS id,
+        start_station_name AS name,
+        start_lat AS lat,
+        start_lng AS lng
+      FROM read_csv_auto('${csvGlob}')
       UNION ALL
       SELECT
-        endStationId AS id,
-        endStationName AS name,
-        endLat AS lat,
-        endLng AS lng
-      FROM read_parquet('${tripsGlob}')
+        end_station_id AS id,
+        end_station_name AS name,
+        end_lat AS lat,
+        end_lng AS lng
+      FROM read_csv_auto('${csvGlob}')
     ),
-    -- Count occurrences of each coordinate (rounded to 5dp) per station name
-    coord_counts AS (
+    -- Median coordinates for each station name
+    station_coords AS (
       SELECT
         name,
-        ROUND(lat, 5) AS lat5,
-        ROUND(lng, 5) AS lng5,
-        COUNT(*) AS cnt
+        MEDIAN(lat) AS latitude,
+        MEDIAN(lng) AS longitude
       FROM station_points
       WHERE name IS NOT NULL AND lat IS NOT NULL AND lng IS NOT NULL
-      GROUP BY name, lat5, lng5
-    ),
-    -- Pick the most common coordinate for each station name
-    most_common_coord AS (
-      SELECT
-        name,
-        lat5 AS latitude,
-        lng5 AS longitude
-      FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY name ORDER BY cnt DESC) AS rn
-        FROM coord_counts
-      )
-      WHERE rn = 1
+      GROUP BY name
     ),
     -- Collect all IDs for each station name
     station_ids AS (
@@ -312,13 +258,13 @@ async function main() {
       GROUP BY name
     )
     SELECT
-      mcc.name,
+      sc.name,
       si.ids_csv,
-      mcc.latitude,
-      mcc.longitude
-    FROM most_common_coord mcc
-    JOIN station_ids si ON mcc.name = si.name
-    ORDER BY mcc.name
+      sc.latitude,
+      sc.longitude
+    FROM station_coords sc
+    JOIN station_ids si ON sc.name = si.name
+    ORDER BY sc.name
   `);
 
   const rows = stationsReader.getRowObjectsJson() as unknown as Array<{

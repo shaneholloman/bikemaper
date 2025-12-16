@@ -7,27 +7,35 @@ Converts raw Citi Bike CSV data into optimized formats for the visualization cli
 Run in order:
 
 ```bash
-# 1. CSV → Parquet (trips)
-bun run build-parquet.ts
-
-# 2. Derive station metadata with geocoding
+# 1. Derive station metadata with geocoding
 bun run build-stations.ts
 
-# 3. Pre-compute route geometries (requires OSRM server on localhost:5000)
-bun run build-routes-parquet.ts
+# 2. Build route cache from OSRM (requires OSRM server on localhost:5000)
+bun run build-routes.ts
 
-# 4. Validate routes output
-bun run check-routes-parquet.ts
+# 3. Build trips parquet with embedded route geometries
+bun run build-parquet.ts
 ```
 
 ## Outputs
 
 | File | Description |
 |------|-------------|
-| `output/trips/2025.parquet` | Trip data (id, stations, timestamps, coords) |
-| `output/routes.parquet` | Route geometries with animation data (path, timeFractions, bearings) |
-| `output/routes-checkpoint.duckdb` | Checkpoint for resumable route building |
+| `output/routes.db` | SQLite cache of routes (start/end station → path, distance) |
+| `output/trips/2025.parquet` | Trip data with embedded route geometry (polyline6) |
 | `apps/client/public/stations.json` | Station search index with borough/neighborhood |
+
+## Parquet Schema
+
+`2025.parquet` columns:
+- `id` - Trip ID
+- `startStationId`, `endStationId` - Station IDs
+- `startedAt`, `endedAt` - Timestamps
+- `bikeType` - classic_bike or electric_bike
+- `memberCasual` - member or casual
+- `startLat`, `startLng`, `endLat`, `endLng` - Coordinates
+- `routeGeometry` - Polyline6-encoded route (endpoints adjusted to trip coords)
+- `routeDistance` - Route distance in meters
 
 ## Prerequisites
 
