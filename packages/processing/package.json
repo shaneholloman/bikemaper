@@ -10,7 +10,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@bikemap/db": "workspace:*",
     "@duckdb/node-api": "^1.4.3-r.1",
     "@mapbox/polyline": "^1.2.1",
     "@turf/boolean-point-in-polygon": "^7.3.1",

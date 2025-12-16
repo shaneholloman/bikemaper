@@ -1,6 +1,5 @@
 "use client";
 
-import { getStations } from "@/app/server/trips";
 import {
   CAMERA_POLLING_INTERVAL_MS,
   CHUNK_SIZE_SECONDS,
@@ -16,6 +15,7 @@ import {
 import { createThrottledSampler } from "@/lib/misc";
 import { useAnimationStore } from "@/lib/stores/animation-store";
 import { usePickerStore } from "@/lib/stores/location-picker-store";
+import { useStationsStore } from "@/lib/stores/stations-store";
 import type { GraphDataPoint, Phase, ProcessedTrip } from "@/lib/trip-types";
 import { TripDataService } from "@/services/trip-data-service";
 import { DataFilterExtension } from "@deck.gl/extensions";
@@ -290,28 +290,15 @@ export const BikeMap = () => {
   const [animState, setAnimState] = useState<AnimationState>("idle");
   const [initialViewState, setInitialViewState] = useState<MapViewState>(INITIAL_VIEW_STATE);
   const [graphData, setGraphData] = useState<GraphDataPoint[]>([]);
-  const [stationMap, setStationMap] = useState<Map<string, string>>(new Map());
-  const [stationRegions, setStationRegions] = useState<Record<string, { region: string; neighborhood: string }>>({});
   const [bearing, setBearing] = useState(0);
 
   const { isPickingLocation, setPickedLocation, pickedLocation } = usePickerStore();
+  const { getStation, load: loadStations } = useStationsStore();
 
-  // Load station data for name lookups
+  // Load station data
   useEffect(() => {
-    getStations().then((stations) => {
-      const map = new Map<string, string>();
-      for (const station of stations) {
-        for (const id of station.ids) {
-          map.set(id, station.name);
-        }
-      }
-      setStationMap(map);
-    });
-    // Load station regions for neighborhood/borough lookups
-    fetch("/station-regions.json")
-      .then((res) => res.json())
-      .then(setStationRegions);
-  }, []);
+    loadStations();
+  }, [loadStations]);
 
   const rafRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -610,32 +597,25 @@ export const BikeMap = () => {
     if (eligibleTrips.length === 0) return;
     const randomTrip = eligibleTrips[Math.floor(Math.random() * eligibleTrips.length)];
 
-    const startStation = stationMap.get(randomTrip.startStationId);
-    const endStation = stationMap.get(randomTrip.endStationId);
-
-    if (!startStation || !endStation) {
-      throw new Error(`Missing station data`);
-    }
-
-    const startRegion = stationRegions[randomTrip.startStationId].neighborhood;
-    const endRegion = stationRegions[randomTrip.endStationId].neighborhood;
+    const startStation = getStation(randomTrip.startStationId);
+    const endStation = getStation(randomTrip.endStationId);
 
     selectTrip({
       id: randomTrip.id,
       info: {
         id: randomTrip.id,
-        rideableType: randomTrip.bikeType,
+        bikeType: randomTrip.bikeType,
         memberCasual: randomTrip.memberCasual,
-        startStationName: startStation,
-        endStationName: endStation,
-        startNeighborhood: startRegion,
-        endNeighborhood: endRegion,
+        startStationName: startStation.name,
+        endStationName: endStation.name,
+        startNeighborhood: startStation.neighborhood,
+        endNeighborhood: endStation.neighborhood,
         startedAt: new Date(randomTrip.startedAtMs),
         endedAt: new Date(randomTrip.endedAtMs),
         routeDistance: randomTrip.routeDistance,
       },
     });
-  }, [activeTrips, selectTrip, stationMap, stationRegions, time]);
+  }, [activeTrips, selectTrip, getStation, time]);
 
   // Cleanup on unmount
   useEffect(() => {

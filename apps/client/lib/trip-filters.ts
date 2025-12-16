@@ -5,7 +5,7 @@ import type { TripWithRoute } from "./trip-types";
  * Used by both Search (getTripsFromStation) and BikeMap (prepareTripsForDeck).
  *
  * Criteria:
- * 1. Must have route geometry
+ * 1. Must have route geometry (polyline6 encoded from routes.parquet)
  * 2. Can't be same-station trip
  * 3. Speed must be 2-18 km/h
  */

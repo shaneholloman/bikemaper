@@ -75,10 +75,10 @@ function prepareTripsForDeck(data: {
 }): ProcessedTrip[] {
   const { trips, windowStartMs: winStart, fadeDurationSimSeconds: fadeDur } = data;
 
-  // Filter trips
-  const validTrips = filterTrips(trips) as (TripWithRoute & {
-    routeGeometry: string;
-  })[];
+  // Filter trips (must have routeGeometry)
+  const validTrips = filterTrips(trips) as Array<
+    TripWithRoute & { routeGeometry: string }
+  >;
 
   const prepared = validTrips
     .map((trip) => {
@@ -158,7 +158,7 @@ function prepareTripsForDeck(data: {
         id: trip.id,
         path: coordinates,
         timestamps,
-        bikeType: trip.rideableType,
+        bikeType: trip.bikeType,
         startTimeSeconds: tripStartSeconds,
         endTimeSeconds: tripEndSeconds,
         visibleStartSeconds,

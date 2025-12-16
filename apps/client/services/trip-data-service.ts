@@ -1,7 +1,4 @@
-import {
-  getRidesStartingIn as getRidesInWindow,
-  getTripsForChunk,
-} from "@/app/server/trips";
+import { duckdbService } from "@/services/duckdb-service";
 import {
   BATCH_SIZE_SECONDS,
   CHUNK_SIZE_SECONDS,
@@ -47,13 +44,16 @@ export class TripDataService {
   }
 
   /**
-   * Initialize the worker and load initial data.
+   * Initialize DuckDB, the worker, and load initial data.
    * Must be called before using other methods.
    */
   async init(): Promise<Map<string, ProcessedTrip>> {
     const { windowStartMs, fadeDurationSimSeconds } = this.config;
 
     console.log("Initializing trip data service...");
+
+    // Initialize DuckDB first (creates Parquet views)
+    await duckdbService.init();
 
     // Create worker dynamically to avoid SSR issues
     this.worker = new Worker(
@@ -283,35 +283,35 @@ export class TripDataService {
     const batchStartMs = windowStartMs + batchId * BATCH_SIZE_SECONDS * 1000;
     const batchEndMs = batchStartMs + BATCH_SIZE_SECONDS * 1000;
 
-    console.log(`Fetching batch ${batchId} from server...`);
+    console.log(`Fetching batch ${batchId} from DuckDB...`);
 
-    const data = await getRidesInWindow({
+    const trips = await duckdbService.getTripsInRange({
       from: new Date(batchStartMs),
       to: new Date(batchEndMs),
     });
 
     // For batch 0, also fetch trips already in progress at animation start
     if (batchId === 0) {
-      const overlapData = await getTripsForChunk({
+      const overlapTrips = await duckdbService.getTripsOverlap({
         chunkStart: animationStartDate,
         chunkEnd: new Date(windowStartMs + CHUNK_SIZE_SECONDS * 1000),
       });
 
       // Merge and dedupe by id
       const tripMap = new Map<string, TripWithRoute>();
-      for (const trip of overlapData.trips) {
+      for (const trip of overlapTrips) {
         tripMap.set(trip.id, trip);
       }
-      for (const trip of data.trips) {
+      for (const trip of trips) {
         tripMap.set(trip.id, trip);
       }
 
       console.log(
-        `Batch 0: ${data.trips.length} starting + ${overlapData.trips.length} overlap = ${tripMap.size} unique`
+        `Batch 0: ${trips.length} starting + ${overlapTrips.length} overlap = ${tripMap.size} unique`
       );
       return Array.from(tripMap.values());
     }
 
-    return data.trips;
+    return trips;
   }
 }

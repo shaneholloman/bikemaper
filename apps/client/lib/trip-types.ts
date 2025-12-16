@@ -1,7 +1,5 @@
 // Shared types for trip processing between main thread and worker
 
-import type { Trip } from "@bikemap/db";
-
 // ============================================================================
 // Graph Types
 // ============================================================================
@@ -12,15 +10,25 @@ export type GraphDataPoint = {
 };
 
 // ============================================================================
-// Trip Types (derived from Prisma)
+// Trip Types (from Parquet schema)
 // ============================================================================
 
-// Trip + Route join (what the SQL query returns)
-// Route type is defined inline since Prisma doesn't generate it (composite key)
-export type TripWithRoute = Trip & {
-  routeGeometry: string | null;
-  routeDistance: number | null;
-  routeDuration: number | null;
+// Trip from 2025.parquet joined with routes.parquet
+export type TripWithRoute = {
+  id: string;
+  startStationId: string;
+  endStationId: string;
+  startedAt: Date;
+  endedAt: Date;
+  bikeType: string;
+  memberCasual: string;
+  startLat: number;
+  startLng: number;
+  endLat: number | null;
+  endLng: number | null;
+  // From routes.parquet (polyline6 encoded for network efficiency)
+  routeGeometry: string | null; // Polyline6 encoded path
+  routeDistance: number | null; // Distance in meters
 };
 
 // ============================================================================

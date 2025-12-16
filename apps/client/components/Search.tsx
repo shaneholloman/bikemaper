@@ -1,24 +1,19 @@
 "use client"
-import { getStations, getTripsFromStation } from "@/app/server/trips"
+import { duckdbService } from "@/services/duckdb-service"
+import { filterTrips } from "@/lib/trip-filters"
 import { EBike } from "@/components/icons/Ebike"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
 import { FADE_DURATION_MS } from "@/lib/config"
 import { formatDateTime, formatDateTimeFull, formatDistance, formatDurationMinutes } from "@/lib/format"
 import { useAnimationStore } from "@/lib/stores/animation-store"
 import { usePickerStore } from "@/lib/stores/location-picker-store"
+import { useStationsStore, type Station } from "@/lib/stores/stations-store"
 import distance from "@turf/distance"
 import { point } from "@turf/helpers"
 import * as chrono from "chrono-node"
 import { Fzf } from "fzf"
 import { ArrowLeft, ArrowRight, Bike, CalendarSearch, MapPin, X } from "lucide-react"
 import React from "react"
-
-type Station = {
-  ids: string[]
-  name: string
-  latitude: number
-  longitude: number
-}
 
 type StationWithDistance = Station & { distance: number }
 
@@ -28,7 +23,7 @@ type Trip = {
   endStationId: string
   startedAt: Date
   endedAt: Date
-  rideableType: string
+  bikeType: string
   memberCasual: string
   routeDistance: number | null
 }
@@ -37,22 +32,8 @@ type SearchStep = "station" | "datetime" | "results"
 
 const MAX_RESULTS = 10
 
-type StationRegion = {
-  region: string
-  neighborhood: string
-}
-
-function getStationName(stationId: string, stationMap: Map<string, Station>): string {
-  const station = stationMap.get(stationId)
-  if (!station) {
-    throw new Error(`Station not found: ${stationId}`)
-  }
-  return station.name
-}
-
 export function Search() {
   const [open, setOpen] = React.useState(false)
-  const [stations, setStations] = React.useState<Station[]>([])
   const [search, setSearch] = React.useState("")
 
   // Multi-step flow state
@@ -61,27 +42,16 @@ export function Search() {
   const [datetimeInput, setDatetimeInput] = React.useState("")
   const [trips, setTrips] = React.useState<Trip[]>([])
   const [resultsSearch, setResultsSearch] = React.useState("")
-  const [stationRegions, setStationRegions] = React.useState<Record<string, StationRegion>>({})
 
   const { pickedLocation, startPicking, clearPicking } = usePickerStore()
   const { animationStartDate } = useAnimationStore()
+  const { stations, getStation, load: loadStations } = useStationsStore()
 
   // Parse datetime with chrono
   const parsedDate = React.useMemo(() => {
     if (!datetimeInput.trim()) return null
     return chrono.parseDate(datetimeInput, animationStartDate)
   }, [datetimeInput, animationStartDate])
-
-  // Map station IDs to stations for O(1) lookup
-  const stationMap = React.useMemo(() => {
-    const map = new Map<string, Station>()
-    for (const station of stations) {
-      for (const id of station.ids) {
-        map.set(id, station)
-      }
-    }
-    return map
-  }, [stations])
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -95,38 +65,18 @@ export function Search() {
   }, [])
 
   React.useEffect(() => {
-    getStations().then(setStations)
-  }, [])
+    loadStations()
+  }, [loadStations])
 
-  // Load station regions
-  React.useEffect(() => {
-    fetch("/station-regions.json")
-      .then((res) => res.json())
-      .then(setStationRegions)
-  }, [])
-
-  // Get region for a station by checking all its IDs
-  const getStationRegion = React.useCallback(
-    (stationIds: string[]): StationRegion | null => {
-      for (const id of stationIds) {
-        if (stationRegions[id]) return stationRegions[id]
-      }
-      return null
-    },
-    [stationRegions]
-  )
-
-  // Get display label for station region (dedupes if neighborhood === region)
+  // Get display label for station (neighborhood, borough)
   const getStationRegionLabel = React.useCallback(
-    (stationIds: string[]): string | null => {
-      const r = getStationRegion(stationIds)
-      if (!r) return null
-      if (r.neighborhood.toLowerCase() === r.region.toLowerCase()) {
-        return r.neighborhood
+    (station: Station): string => {
+      if (station.neighborhood.toLowerCase() === station.borough.toLowerCase()) {
+        return station.neighborhood
       }
-      return `${r.neighborhood}, ${r.region}`
+      return `${station.neighborhood}, ${station.borough}`
     },
-    [getStationRegion]
+    []
   )
 
   // Re-open dialog when location is picked
@@ -156,12 +106,9 @@ export function Search() {
   const neighborhoodFzf = React.useMemo(
     () =>
       new Fzf(stations, {
-        selector: (s) => {
-          const region = s.ids.map((id) => stationRegions[id]).find(Boolean)
-          return region?.neighborhood ?? ""
-        },
+        selector: (s) => s.neighborhood,
       }),
-    [stations, stationRegions]
+    [stations]
   )
 
   const filteredStations = React.useMemo((): (Station | StationWithDistance)[] => {
@@ -214,15 +161,13 @@ export function Search() {
 
     const tripFzf = new Fzf(trips, {
       selector: (trip) => {
-        const endStation = stationMap.get(trip.endStationId)
-        const endStationName = endStation?.name ?? ""
-        const neighborhood = stationRegions[trip.endStationId]?.neighborhood ?? ""
-        return `${endStationName} ${neighborhood}`
+        const endStation = getStation(trip.endStationId)
+        return `${endStation.name} ${endStation.neighborhood}`
       },
     })
 
     return tripFzf.find(query).map((r) => r.item)
-  }, [trips, resultsSearch, stationMap, stationRegions])
+  }, [trips, resultsSearch, getStation])
 
   const handlePickFromMap = () => {
     setOpen(false)
@@ -253,13 +198,19 @@ export function Search() {
 
   const handleConfirmSelection = async () => {
     if (selectedStation && parsedDate) {
-      const result = await getTripsFromStation({
+      // Initialize DuckDB if not already done
+      await duckdbService.init()
+
+      const rawTrips = await duckdbService.getTripsFromStation({
         startStationIds: selectedStation.ids,
         datetime: parsedDate,
         intervalSeconds: 1800,
       })
-      console.log("Trips from station:", result.trips)
-      setTrips(result.trips)
+
+      // Filter trips (must have route, valid speed, etc.)
+      const filtered = filterTrips(rawTrips)
+      console.log("Trips from station:", filtered)
+      setTrips(filtered)
       setStep("results")
     }
   }
@@ -271,11 +222,9 @@ export function Search() {
     const startTime = new Date(new Date(trip.startedAt).getTime() - FADE_DURATION_MS * speedup)
     setAnimationStartDate(startTime)
 
-    const startRegion = getStationRegion(selectedStation!.ids)
-    const endStation = stationMap.get(trip.endStationId)
-    const endRegion = getStationRegion(endStation!.ids)
-    if (!endRegion || !startRegion || !selectedStation) {
-      throw new Error(`Missing data`)
+    const endStation = getStation(trip.endStationId)
+    if (!selectedStation) {
+      throw new Error(`No station selected`)
     }
 
     // Select the trip for highlighting with full metadata
@@ -283,12 +232,12 @@ export function Search() {
       id: trip.id,
       info: {
         id: trip.id,
-        rideableType: trip.rideableType,
+        bikeType: trip.bikeType,
         memberCasual: trip.memberCasual,
         startStationName: selectedStation.name,
-        endStationName: getStationName(trip.endStationId, stationMap),
-        startNeighborhood: startRegion.neighborhood,
-        endNeighborhood: endRegion.neighborhood,
+        endStationName: endStation.name,
+        startNeighborhood: selectedStation.neighborhood,
+        endNeighborhood: endStation.neighborhood,
         startedAt: trip.startedAt,
         endedAt: trip.endedAt,
         routeDistance: trip.routeDistance,
@@ -356,7 +305,7 @@ export function Search() {
             {filteredTrips.map((trip) => (
               <CommandItem key={trip.id} onSelect={() => handleSelectTrip(trip)}>
                 <div className="flex items-center gap-3 w-full">
-                  {trip.rideableType === "electric_bike" ? (
+                  {trip.bikeType === "electric_bike" ? (
                     <EBike className="size-8 text-[#7DCFFF] shrink-0" />
                   ) : (
                     <Bike className="size-8 text-[#BB9AF7] shrink-0" />
@@ -371,13 +320,11 @@ export function Search() {
                   </div>
                   <div className="ml-auto flex flex-col items-end">
                     <span className="text-zinc-100 font-normal truncate max-w-[30ch]">
-                      {getStationName(trip.endStationId, stationMap)}
+                      {getStation(trip.endStationId).name}
                     </span>
-                    {stationRegions[trip.endStationId]?.neighborhood && (
-                      <span className="text-sm text-muted-foreground">
-                        {stationRegions[trip.endStationId].neighborhood}
-                      </span>
-                    )}
+                    <span className="text-sm text-muted-foreground">
+                      {getStation(trip.endStationId).neighborhood}
+                    </span>
                   </div>
                 </div>
               </CommandItem>
@@ -426,11 +373,9 @@ export function Search() {
               <Bike className="size-4" />
               <div className="flex flex-col flex-1">
                 <span>{station.name}</span>
-                {getStationRegionLabel(station.ids) && (
-                  <span className="text-xs text-muted-foreground">
-                    {getStationRegionLabel(station.ids)}
-                  </span>
-                )}
+                <span className="text-xs text-muted-foreground">
+                  {getStationRegionLabel(station)}
+                </span>
               </div>
               {"distance" in station && (
                 <span className="text-muted-foreground text-xs">

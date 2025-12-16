@@ -4,7 +4,7 @@ import { usePickerStore } from "./location-picker-store"
 
 export type SelectedTripInfo = {
   id: string;
-  rideableType: string;
+  bikeType: string;
   memberCasual: string;
   startStationName: string;
   endStationName: string;

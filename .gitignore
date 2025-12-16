@@ -8,3 +8,4 @@ docs/
 # Monorepo
 node_modules/
 routes.json
+cors.json
