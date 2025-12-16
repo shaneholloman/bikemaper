@@ -211,9 +211,9 @@ class DuckDBService {
     }>;
 
     return rows.map((row) => {
-      // DuckDB returns timestamps as BigInt microseconds, convert to Date
-      const startedAt = new Date(Number(row.startedAt) / 1000);
-      const endedAt = new Date(Number(row.endedAt) / 1000);
+      // DuckDB WASM returns timestamps as BigInt milliseconds
+      const startedAt = new Date(Number(row.startedAt));
+      const endedAt = new Date(Number(row.endedAt));
 
       return {
         id: row.id,
