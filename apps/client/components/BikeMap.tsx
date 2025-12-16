@@ -780,8 +780,10 @@ export const BikeMap = () => {
         controller={true}
         onClick={handleMapClick}
         onViewStateChange={({ viewState }) => {
-          if ("bearing" in viewState && typeof viewState.bearing === "number") {
-            setBearing(viewState.bearing);
+          // Capture bearing before the microtask so TS keeps the narrowing.
+          const bearing = "bearing" in viewState ? viewState.bearing : undefined;
+          if (typeof bearing === "number") {
+            queueMicrotask(() => setBearing(bearing));
           }
         }}
         getCursor={() => (isPickingLocation ? "crosshair" : "grab")}
