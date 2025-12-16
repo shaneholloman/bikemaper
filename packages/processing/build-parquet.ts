@@ -288,8 +288,9 @@ async function main() {
       t.ride_id as id,
       t.start_station_id as startStationId,
       t.end_station_id as endStationId,
-      t.started_at as startedAt,
-      t.ended_at as endedAt,
+      -- Convert naive local time (America/New_York) to UTC
+      (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
+      (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
       t.rideable_type as bikeType,
       t.member_casual as memberCasual,
       t.start_lat as startLat,
