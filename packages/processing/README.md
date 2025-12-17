@@ -2,12 +2,20 @@
 
 Converts raw Citi Bike CSV data into optimized formats for the visualization client.
 
+## Data Flow
+
+```
+CSV files (all years) → build-stations.ts → stations.json
+CSV files (all years) → build-routes.ts   → routes.db
+CSV files (per year)  → build-parquet.ts  → parquet files
+```
+
 ## Scripts
 
 Run in order:
 
 ```bash
-# 1. Derive station metadata with geocoding
+# 1. Build unified station list with aliases (from ALL years)
 bun run build-stations.ts
 
 # 2. Build route cache from OSRM (requires OSRM server on localhost:5000)
@@ -22,46 +30,62 @@ bun run build-parquet.ts <year>
 
 | File | Description |
 |------|-------------|
-| `output/routes.db` | SQLite cache of routes (start/end station → path, distance) |
+| `apps/client/public/stations.json` | Station index with aliases, coordinates, borough/neighborhood |
+| `output/routes.db` | SQLite cache of routes keyed by station NAME |
 | `output/trips/<year>-<month>.parquet` | Monthly trip data with embedded route geometry |
-| `apps/client/public/stations.json` | Station search index with borough/neighborhood |
 
-## Legacy Schema Support
+## How It Works
 
-The pipeline automatically detects and handles two CSV schemas:
+### Station Names as Universal Key
 
-| Schema | Years | Detection |
-|--------|-------|-----------|
-| Legacy | 2013, 2018 | Has `tripduration` column |
-| Modern | 2020+ | Has `ride_id` column |
+Routes are keyed by **station name** (not ID) because:
+- Station IDs changed between years (e.g., `72` in 2018 → `6926.01` in 2025)
+- Station names are unique
+  
+### Station Aliases
 
-**Legacy schema transformations:**
-- `bikeid + starttime` → `ride_id` (MD5 hash)
-- `'classic_bike'` → `rideable_type` (no e-bikes existed)
-- `usertype` → `member_casual` (Subscriber→member, Customer→casual)
-- Column names normalized (spaces → underscores)
+Station names changed over time (e.g., "8 Ave & W 31 St" → "W 31 St & 8 Ave"). The pipeline handles this via:
 
-**Route matching for legacy data:**
-Legacy station IDs don't match current routes.db. The pipeline matches by station name:
-1. Legacy trip's `start station name` → lookup in stations.json → 2025 station ID
-2. Join to routes.db using the translated ID
-3. Defunct stations (not in stations.json) get NULL routes
+1. **`stations.json`** stores canonical name + historical aliases
+2. **`build-routes.ts`** normalizes CSV names → canonical before creating route keys
+3. **`build-parquet.ts`** normalizes CSV names → canonical before joining with routes
+
+### Legacy vs Modern Schema
+
+| Schema | Years | Detection | Route Matching |
+|--------|-------|-----------|----------------|
+| Legacy | 2013-2019 | Has `tripduration` column | Coordinate snap → nearest station name |
+| Modern | 2020+ | Has `ride_id` column | CSV name → canonical name via alias lookup |
+
+**Legacy coordinate matching:** Trip coordinates are matched to the nearest current station within 200m, giving ~98% route coverage despite old station names/IDs.
 
 ## Parquet Schema
 
-Output columns:
-- `id` - Trip ID
-- `startStationId`, `endStationId` - Station IDs
-- `startedAt`, `endedAt` - Timestamps
-- `bikeType` - classic_bike or electric_bike
-- `memberCasual` - member or casual
-- `startLat`, `startLng`, `endLat`, `endLng` - Coordinates
-- `routeGeometry` - Polyline6-encoded route (endpoints adjusted to trip coords)
-- `routeDistance` - Route distance in meters
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | string | Trip ID |
+| `startStationName` | string | Canonical station name |
+| `endStationName` | string | Canonical station name |
+| `startedAt` | timestamp | Trip start (UTC) |
+| `endedAt` | timestamp | Trip end (UTC) |
+| `bikeType` | string | `classic_bike` or `electric_bike` |
+| `memberCasual` | string | `member` or `casual` |
+| `startLat/Lng` | float | Start coordinates |
+| `endLat/Lng` | float | End coordinates |
+| `routeGeometry` | string | Polyline6-encoded route |
+| `routeDistance` | float | Route distance in meters |
 
 ## Prerequisites
 
 - CSV files in `data/<year>/**/*.csv`
-- OSRM server running for route building: `osrm-routed /path/to/NewYork.osrm`
+- OSRM server running on `localhost:5000`
 - NYC neighborhood GeoJSON in `data/` for station geocoding
-- `stations.json` (from build-stations.ts) for legacy route matching
+
+## Route Coverage
+
+| Year | Coverage | Notes |
+|------|----------|-------|
+| 2013-2019 | ~98% | Coordinate-based matching |
+| 2020+ | ~98% | Name-based matching with alias normalization |
+
+The ~2% without routes are almost entirely round trips (same start/end station).
