@@ -15,6 +15,29 @@ import { globSync } from "glob";
 import path from "path";
 import { dataDir, formatHumanReadableBytes, gitRoot } from "./utils";
 
+type SchemaType = "legacy" | "modern";
+
+async function detectSchemaType(data: {
+  connection: DuckDBConnection;
+  csvGlob: string;
+}): Promise<SchemaType> {
+  const { connection, csvGlob } = data;
+  // Read column names from first CSV (sample_size=1 for speed)
+  const result = await connection.runAndReadAll(`
+    SELECT column_name
+    FROM (DESCRIBE SELECT * FROM read_csv_auto('${csvGlob}', sample_size=1))
+  `);
+  const columns = result
+    .getRowObjects()
+    .map((r) => (r as { column_name: string }).column_name);
+
+  // Legacy schema has 'tripduration', modern has 'ride_id'
+  if (columns.includes("tripduration")) {
+    return "legacy";
+  }
+  return "modern";
+}
+
 // Parse CLI argument
 const targetYearArg = process.argv[2];
 if (!targetYearArg || !/^\d{4}$/.test(targetYearArg)) {
@@ -138,24 +161,51 @@ async function main() {
 
   const startTime = Date.now();
 
-  await connection.run(`
-    CREATE TEMP TABLE raw AS
-    SELECT
-      ride_id,
-      rideable_type,
-      started_at,
-      ended_at,
-      start_station_name,
-      start_station_id,
-      end_station_name,
-      end_station_id,
-      start_lat,
-      start_lng,
-      end_lat,
-      end_lng,
-      member_casual
-    FROM read_csv_auto('${csvGlob}')
-  `);
+  // Detect schema type from CSV columns
+  const schemaType = await detectSchemaType({ connection, csvGlob });
+  console.log(`Detected schema type: ${schemaType}`);
+
+  if (schemaType === "legacy") {
+    // Legacy schema (2013, 2018): normalize to modern format
+    // We only need station names (for route lookup via stations.json) - legacy IDs are useless
+    // union_by_name=true handles type mismatches between files
+    await connection.run(`
+      CREATE TEMP TABLE raw AS
+      SELECT
+        md5(bikeid::VARCHAR || starttime::VARCHAR) as ride_id,
+        'classic_bike' as rideable_type,
+        starttime as started_at,
+        stoptime as ended_at,
+        "start station name" as start_station_name,
+        "end station name" as end_station_name,
+        TRY_CAST("start station latitude" AS DOUBLE) as start_lat,
+        TRY_CAST("start station longitude" AS DOUBLE) as start_lng,
+        TRY_CAST("end station latitude" AS DOUBLE) as end_lat,
+        TRY_CAST("end station longitude" AS DOUBLE) as end_lng,
+        CASE WHEN usertype = 'Subscriber' THEN 'member' ELSE 'casual' END as member_casual
+      FROM read_csv_auto('${csvGlob}', union_by_name=true)
+    `);
+  } else {
+    // Modern schema (2020+): use columns directly
+    await connection.run(`
+      CREATE TEMP TABLE raw AS
+      SELECT
+        ride_id,
+        rideable_type,
+        started_at,
+        ended_at,
+        start_station_name,
+        start_station_id,
+        end_station_name,
+        end_station_id,
+        start_lat,
+        start_lng,
+        end_lat,
+        end_lng,
+        member_casual
+      FROM read_csv_auto('${csvGlob}')
+    `);
+  }
 
   const loadTime = Date.now() - startTime;
   console.log(`Loaded CSVs into temp table in ${(loadTime / 1000).toFixed(1)}s`);
@@ -163,12 +213,18 @@ async function main() {
   // 2. Validate data
   console.log("\nValidating data...");
 
+  // Station ID checks only apply to modern schema (legacy doesn't have them)
+  const stationIdValidation =
+    schemaType === "legacy"
+      ? `0::BIGINT as null_start_station_id, 0::BIGINT as null_end_station_id,`
+      : `COUNT(*) FILTER (WHERE start_station_id IS NULL) as null_start_station_id,
+         COUNT(*) FILTER (WHERE end_station_id IS NULL) as null_end_station_id,`;
+
   const validationReader = await connection.runAndReadAll(`
     SELECT
       -- NULL checks
       COUNT(*) FILTER (WHERE ride_id IS NULL) as null_ride_id,
-      COUNT(*) FILTER (WHERE start_station_id IS NULL) as null_start_station_id,
-      COUNT(*) FILTER (WHERE end_station_id IS NULL) as null_end_station_id,
+      ${stationIdValidation}
       COUNT(*) FILTER (WHERE start_station_name IS NULL) as null_start_station_name,
       COUNT(*) FILTER (WHERE end_station_name IS NULL) as null_end_station_name,
       COUNT(*) FILTER (WHERE started_at IS NULL) as null_started_at,
@@ -242,6 +298,46 @@ async function main() {
   const routeCount = Number((routeCountReader.getRowObjects()[0] as { count: bigint }).count);
   console.log(`  ${routeCount} routes loaded`);
 
+  // Load station data from stations.json for route matching
+  // Routes are keyed by station NAME (not ID) because station IDs change between years
+  const stationsJsonPath = path.join(gitRoot, "apps/client/public/stations.json");
+  if (!fs.existsSync(stationsJsonPath)) {
+    console.warn(`stations.json not found - trips will have no routes`);
+  } else {
+    // Create name normalization lookup: maps any name (canonical OR alias) -> canonical name
+    // This handles station names that changed over time (e.g., "8 Ave & W 31 St" -> "W 31 St & 8 Ave")
+    console.log("\nLoading station name lookup from stations.json...");
+    await connection.run(`
+      CREATE TABLE station_name_lookup AS
+      -- Canonical names map to themselves
+      SELECT name as any_name, name as canonical_name
+      FROM read_json_auto('${stationsJsonPath}')
+      UNION ALL
+      -- Aliases map to their canonical name
+      SELECT UNNEST(aliases) as any_name, name as canonical_name
+      FROM read_json_auto('${stationsJsonPath}')
+    `);
+    const lookupCountReader = await connection.runAndReadAll(`SELECT COUNT(*) as count FROM station_name_lookup`);
+    const lookupCount = Number((lookupCountReader.getRowObjects()[0] as { count: bigint }).count);
+    console.log(`  ${lookupCount} name mappings loaded (canonical + aliases)`);
+
+    if (schemaType === "legacy") {
+      // Legacy data also needs coordinate-based matching since names may not match exactly
+      console.log("Loading station coordinates for legacy coordinate matching...");
+      await connection.run(`
+        CREATE TABLE station_coords AS
+        SELECT
+          name as station_name,
+          latitude,
+          longitude
+        FROM read_json_auto('${stationsJsonPath}')
+      `);
+      const coordCountReader = await connection.runAndReadAll(`SELECT COUNT(*) as count FROM station_coords`);
+      const coordCount = Number((coordCountReader.getRowObjects()[0] as { count: bigint }).count);
+      console.log(`  ${coordCount} stations loaded for coordinate matching`);
+    }
+  }
+
   // 4. Create trips table with routes via SQL JOIN (no JS iteration!)
   console.log("\nJoining trips with routes...");
 
@@ -253,10 +349,15 @@ async function main() {
     maxLng: -73.5,
   };
 
+  // Legacy data doesn't have station IDs (we get them from name lookup later)
+  const stationIdFilter =
+    schemaType === "legacy"
+      ? ""
+      : `AND start_station_id IS NOT NULL AND end_station_id IS NOT NULL`;
+
   const validRowFilter = `
     ride_id IS NOT NULL
-    AND start_station_id IS NOT NULL
-    AND end_station_id IS NOT NULL
+    ${stationIdFilter}
     AND start_station_name IS NOT NULL
     AND end_station_name IS NOT NULL
     AND started_at IS NOT NULL
@@ -295,28 +396,88 @@ async function main() {
   // Step 3: JOIN with routes
   console.log("  Step 3: Joining with routes...");
   stepStart = Date.now();
-  await connection.run(`
-    CREATE TABLE joined AS
-    SELECT
-      t.ride_id as id,
-      t.start_station_id as startStationId,
-      t.end_station_id as endStationId,
-      -- Convert naive local time (America/New_York) to UTC
-      (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
-      (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
-      t.rideable_type as bikeType,
-      t.member_casual as memberCasual,
-      t.start_lat as startLat,
-      t.start_lng as startLng,
-      t.end_lat as endLat,
-      t.end_lng as endLng,
-      r.geometry as routeGeometry,
-      r.distance as routeDistance
-    FROM deduped t
-    LEFT JOIN routes r
-      ON t.start_station_id = r.start_station_id
-      AND t.end_station_id = r.end_station_id
-  `);
+
+  if (schemaType === "legacy") {
+    // Legacy data: match station coordinates to nearest current station (~200m threshold)
+    // Routes are keyed by station NAME, so coordinate snap returns station_name
+    // 0.002 lat = ~220m, 0.003 lng = ~230m at NYC latitude
+    await connection.run(`
+      CREATE TABLE joined AS
+      SELECT
+        t.ride_id as id,
+        sc_start.station_name as startStationName,
+        sc_end.station_name as endStationName,
+        -- Convert naive local time (America/New_York) to UTC
+        (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
+        (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
+        t.rideable_type as bikeType,
+        t.member_casual as memberCasual,
+        t.start_lat as startLat,
+        t.start_lng as startLng,
+        t.end_lat as endLat,
+        t.end_lng as endLng,
+        r.geometry as routeGeometry,
+        r.distance as routeDistance
+      FROM deduped t
+      -- Find nearest station by coordinates for start
+      LEFT JOIN LATERAL (
+        SELECT station_name
+        FROM station_coords
+        WHERE ABS(t.start_lat - latitude) < 0.002
+          AND ABS(t.start_lng - longitude) < 0.003
+        ORDER BY (t.start_lat - latitude)*(t.start_lat - latitude) +
+                 (t.start_lng - longitude)*(t.start_lng - longitude)
+        LIMIT 1
+      ) sc_start ON true
+      -- Find nearest station by coordinates for end
+      LEFT JOIN LATERAL (
+        SELECT station_name
+        FROM station_coords
+        WHERE ABS(t.end_lat - latitude) < 0.002
+          AND ABS(t.end_lng - longitude) < 0.003
+        ORDER BY (t.end_lat - latitude)*(t.end_lat - latitude) +
+                 (t.end_lng - longitude)*(t.end_lng - longitude)
+        LIMIT 1
+      ) sc_end ON true
+      LEFT JOIN routes r
+        ON sc_start.station_name = r.start_station_name
+        AND sc_end.station_name = r.end_station_name
+    `);
+  } else {
+    // Modern data: normalize CSV station names to canonical names via lookup table
+    // This handles names that changed over time (e.g., "8 Ave & W 31 St" -> "W 31 St & 8 Ave")
+    // Routes are keyed by canonical name, so we must normalize before joining
+    await connection.run(`
+      CREATE TABLE joined AS
+      SELECT
+        t.ride_id as id,
+        -- Use canonical name for station fields (for client lookup in stations.json)
+        COALESCE(snl_start.canonical_name, t.start_station_name) as startStationName,
+        COALESCE(snl_end.canonical_name, t.end_station_name) as endStationName,
+        -- Convert naive local time (America/New_York) to UTC
+        (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
+        (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
+        t.rideable_type as bikeType,
+        t.member_casual as memberCasual,
+        t.start_lat as startLat,
+        t.start_lng as startLng,
+        t.end_lat as endLat,
+        t.end_lng as endLng,
+        r.geometry as routeGeometry,
+        r.distance as routeDistance
+      FROM deduped t
+      -- Normalize start station name: CSV name -> canonical name
+      LEFT JOIN station_name_lookup snl_start
+        ON t.start_station_name = snl_start.any_name
+      -- Normalize end station name: CSV name -> canonical name
+      LEFT JOIN station_name_lookup snl_end
+        ON t.end_station_name = snl_end.any_name
+      -- Join routes on canonical names
+      LEFT JOIN routes r
+        ON COALESCE(snl_start.canonical_name, t.start_station_name) = r.start_station_name
+        AND COALESCE(snl_end.canonical_name, t.end_station_name) = r.end_station_name
+    `);
+  }
   console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
 
   // Step 4: Sort by date (enables row group pruning for date-range queries)
@@ -397,6 +558,9 @@ async function main() {
   console.log(`  ${withoutRoute} trips without routes`);
 
   connection.closeSync();
+
+  // Clean up temp directory
+  fs.rmSync(tempDir, { recursive: true, force: true });
 
   const totalTime = Date.now() - startTime;
   console.log(`\nDone in ${(totalTime / 1000).toFixed(1)}s`);

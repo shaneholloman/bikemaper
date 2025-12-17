@@ -3,7 +3,7 @@ import path from "path";
 
 export const gitRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
 export const dataDir = path.join(gitRoot, "data");
-export const csvGlob = path.join(dataDir, "2025/**/*.csv");
+export const csvGlob = path.join(dataDir, "**/*.csv");
 
 export function formatHumanReadableBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
