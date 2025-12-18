@@ -140,9 +140,18 @@ async function main() {
       -- Bike type: use rideable_type if present, else 'classic_bike' for legacy
       COALESCE(rideable_type, 'classic_bike') as rideable_type,
 
-      -- Timestamps: use modern columns if present, else legacy (cast to ensure same type)
-      COALESCE(TRY_CAST(started_at AS TIMESTAMP), TRY_CAST(starttime AS TIMESTAMP)) as started_at,
-      COALESCE(TRY_CAST(ended_at AS TIMESTAMP), TRY_CAST(stoptime AS TIMESTAMP)) as ended_at,
+      -- Timestamps: use modern columns if present, else legacy
+      -- Legacy has two formats: ISO (YYYY-MM-DD) and US (M/D/YYYY)
+      COALESCE(
+        TRY_CAST(started_at AS TIMESTAMP),
+        TRY_CAST(starttime AS TIMESTAMP),
+        strptime(starttime, '%m/%d/%Y %H:%M:%S')
+      ) as started_at,
+      COALESCE(
+        TRY_CAST(ended_at AS TIMESTAMP),
+        TRY_CAST(stoptime AS TIMESTAMP),
+        strptime(stoptime, '%m/%d/%Y %H:%M:%S')
+      ) as ended_at,
 
       -- Station names: modern uses underscores, legacy uses spaces
       COALESCE(start_station_name, "start station name") as start_station_name,
@@ -165,6 +174,27 @@ async function main() {
 
   const loadTime = Date.now() - startTime;
   console.log(`Loaded CSVs into temp table in ${(loadTime / 1000).toFixed(1)}s`);
+
+  // Pre-compute output month for efficient filtering
+  // This avoids re-computing timezone conversion + string formatting for every row on every month iteration
+  console.log("\nPre-computing output months...");
+  const precomputeStart = Date.now();
+  await connection.run(`
+    ALTER TABLE raw ADD COLUMN output_month VARCHAR
+  `);
+  await connection.run(`
+    UPDATE raw SET output_month = strftime(
+      (started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC',
+      '%Y-%m'
+    )
+    WHERE started_at IS NOT NULL
+  `);
+  console.log("Creating index on output_month...");
+  await connection.run(`
+    CREATE INDEX idx_output_month ON raw(output_month)
+  `);
+  const precomputeTime = Date.now() - precomputeStart;
+  console.log(`Pre-computed output months in ${(precomputeTime / 1000).toFixed(1)}s`);
 
   // 2. Validate data
   console.log("\nValidating data...");
@@ -270,9 +300,7 @@ async function main() {
     console.log(`  ${lookupCount} name mappings loaded (canonical + aliases)`);
   }
 
-  // 4. Create trips table with routes via SQL JOIN (no JS iteration!)
-  console.log("\nJoining trips with routes...");
-
+  // 4. Process year by year to avoid OOM
   const validRowFilter = `
     ride_id IS NOT NULL
     AND start_station_name IS NOT NULL
@@ -292,130 +320,104 @@ async function main() {
     AND end_lng BETWEEN ${NYC_BOUNDS.minLng} AND ${NYC_BOUNDS.maxLng}
   `;
 
-  // Step 1: Filter valid rows
-  console.log("  Step 1: Filtering valid rows...");
-  let stepStart = Date.now();
-  await connection.run(`
-    CREATE TABLE filtered AS
-    SELECT * FROM raw WHERE ${validRowFilter}
-  `);
-  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
-
-  // Step 2: Deduplicate by ride_id
-  console.log("  Step 2: Deduplicating by ride_id...");
-  stepStart = Date.now();
-  await connection.run(`
-    CREATE TABLE deduped AS
-    SELECT DISTINCT ON (ride_id) * FROM filtered
-  `);
-  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
-
-  // Step 3: JOIN with routes
-  // All station names (legacy + modern) are in the alias lookup from stations.json
-  // since build-stations.ts extracts names from ALL years
-  console.log("  Step 3: Joining with routes...");
-  stepStart = Date.now();
-
-  await connection.run(`
-    CREATE TABLE joined AS
-    SELECT
-      t.ride_id as id,
-      COALESCE(snl_start.canonical_name, t.start_station_name) as startStationName,
-      COALESCE(snl_end.canonical_name, t.end_station_name) as endStationName,
-      -- Convert naive local time (America/New_York) to UTC
-      (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
-      (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
-      t.rideable_type as bikeType,
-      t.member_casual as memberCasual,
-      t.start_lat as startLat,
-      t.start_lng as startLng,
-      t.end_lat as endLat,
-      t.end_lng as endLng,
-      r.geometry as routeGeometry,
-      r.distance as routeDistance
-    FROM deduped t
-    -- Normalize station names via alias lookup (works for both legacy and modern)
-    LEFT JOIN station_name_lookup snl_start
-      ON t.start_station_name = snl_start.any_name
-    LEFT JOIN station_name_lookup snl_end
-      ON t.end_station_name = snl_end.any_name
-    -- Join routes using resolved station names
-    LEFT JOIN routes r
-      ON r.start_station_name = COALESCE(snl_start.canonical_name, t.start_station_name)
-      AND r.end_station_name = COALESCE(snl_end.canonical_name, t.end_station_name)
-  `);
-  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
-
-  // Step 4: Sort by date (enables row group pruning for date-range queries)
-  console.log("  Step 4: Sorting by startedAt...");
-  stepStart = Date.now();
-  await connection.run(`
-    CREATE TABLE trips AS
-    SELECT * FROM joined ORDER BY startedAt
-  `);
-  console.log(`    Done in ${((Date.now() - stepStart) / 1000).toFixed(1)}s`);
-
-  // Get stats
-  const statsReader = await connection.runAndReadAll(`
-    SELECT
-      COUNT(*) as total,
-      COUNT(routeGeometry) as with_route
-    FROM trips
-  `);
-  const stats = statsReader.getRowObjects()[0] as { total: bigint; with_route: bigint };
-  const tripCount = Number(stats.total);
-  const withRoute = Number(stats.with_route);
-  const withoutRoute = tripCount - withRoute;
-  console.log(`  ${tripCount} trips created (${withRoute} with routes, ${withoutRoute} without)`);
-
-  // 5. Export to monthly parquet files
-  console.log("\nExporting to monthly Parquet files...");
-
-  // Get distinct months in the data
+  // Get distinct output months (uses pre-computed column)
   const monthsResult = await connection.runAndReadAll(`
-    SELECT DISTINCT strftime(startedAt, '%Y-%m') as month
-    FROM trips
+    SELECT DISTINCT output_month as month
+    FROM raw
+    WHERE output_month IS NOT NULL
     ORDER BY month
   `);
-
   const months = monthsResult.getRowObjects() as Array<{ month: string }>;
-  console.log(`Found ${months.length} months of data: ${months.map((m) => m.month).join(", ")}`);
+  console.log(`\nFound ${months.length} months to process: ${months[0]?.month} to ${months[months.length - 1]?.month}`);
 
+  let totalTripCount = 0;
+  let totalWithRoute = 0;
   let totalParquetBytes = 0;
 
-  for (const { month } of months) {
-    const parts = month.split("-");
-    const year = parts[0];
-    const monthNum = parts[1];
-    if (!year || !monthNum) {
-      throw new Error(`Invalid month format: ${month}`);
-    }
-    const nextMonth =
-      monthNum === "12"
-        ? `${parseInt(year) + 1}-01`
-        : `${year}-${String(parseInt(monthNum) + 1).padStart(2, "0")}`;
+  for (let i = 0; i < months.length; i++) {
+    const month = months[i]!.month;
+    console.log(`\n[${i + 1}/${months.length}] Processing ${month}...`);
+    const stepStart = Date.now();
 
+    // Filter valid rows for this output month (uses pre-computed index)
+    await connection.run(`
+      CREATE TABLE filtered_month AS
+      SELECT * FROM raw
+      WHERE ${validRowFilter}
+        AND output_month = '${month}'
+    `);
+
+    // Deduplicate by ride_id
+    await connection.run(`
+      CREATE TABLE deduped_month AS
+      SELECT DISTINCT ON (ride_id) * FROM filtered_month
+    `);
+
+    // JOIN with routes
+    await connection.run(`
+      CREATE TABLE joined_month AS
+      SELECT
+        t.ride_id as id,
+        COALESCE(snl_start.canonical_name, t.start_station_name) as startStationName,
+        COALESCE(snl_end.canonical_name, t.end_station_name) as endStationName,
+        (t.started_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as startedAt,
+        (t.ended_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' as endedAt,
+        t.rideable_type as bikeType,
+        t.member_casual as memberCasual,
+        t.start_lat as startLat,
+        t.start_lng as startLng,
+        t.end_lat as endLat,
+        t.end_lng as endLng,
+        r.geometry as routeGeometry,
+        r.distance as routeDistance
+      FROM deduped_month t
+      LEFT JOIN station_name_lookup snl_start
+        ON t.start_station_name = snl_start.any_name
+      LEFT JOIN station_name_lookup snl_end
+        ON t.end_station_name = snl_end.any_name
+      LEFT JOIN routes r
+        ON r.start_station_name = COALESCE(snl_start.canonical_name, t.start_station_name)
+        AND r.end_station_name = COALESCE(snl_end.canonical_name, t.end_station_name)
+    `);
+
+    // Get stats for this month
+    const statsReader = await connection.runAndReadAll(`
+      SELECT COUNT(*) as total, COUNT(routeGeometry) as with_route FROM joined_month
+    `);
+    const stats = statsReader.getRowObjects()[0] as { total: bigint; with_route: bigint };
+    const monthTripCount = Number(stats.total);
+    const monthWithRoute = Number(stats.with_route);
+    totalTripCount += monthTripCount;
+    totalWithRoute += monthWithRoute;
+
+    // Export to parquet
     const monthPath = path.join(outputDir, `trips/${month}.parquet`);
     await connection.run(`
-      COPY (
-        SELECT * FROM trips
-        WHERE startedAt >= '${month}-01'::TIMESTAMP
-          AND startedAt < '${nextMonth}-01'::TIMESTAMP
-      ) TO '${monthPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
+      COPY (SELECT * FROM joined_month ORDER BY startedAt)
+      TO '${monthPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
     `);
 
     const monthStats = fs.statSync(monthPath);
     totalParquetBytes += monthStats.size;
-    console.log(`  ${month}.parquet: ${(monthStats.size / 1024 / 1024).toFixed(1)} MB`);
+    const elapsed = ((Date.now() - stepStart) / 1000).toFixed(1);
+    console.log(`  ${monthTripCount} trips (${monthWithRoute} with routes) → ${(monthStats.size / 1024 / 1024).toFixed(1)} MB in ${elapsed}s`);
+
+    // Clean up month tables before next iteration
+    await connection.run(`DROP TABLE filtered_month`);
+    await connection.run(`DROP TABLE deduped_month`);
+    await connection.run(`DROP TABLE joined_month`);
   }
 
-  const droppedCount = Number(validation.total_rows) - tripCount;
+  // Final summary
+  const totalWithoutRoute = totalTripCount - totalWithRoute;
+  const droppedCount = Number(validation.total_rows) - totalTripCount;
   const droppedPct = ((droppedCount / Number(validation.total_rows)) * 100).toFixed(2);
-  console.warn(`Total data loss: ${droppedCount} rows (${droppedPct}%) dropped`);
+  console.warn(`\nTotal data loss: ${droppedCount} rows (${droppedPct}%) dropped`);
 
-  console.log(`\nTotal Parquet output: ${(totalParquetBytes / 1024 / 1024).toFixed(1)} MB across ${months.length} files`);
-  console.log(`  ${withRoute} trips with routes (${((withRoute / tripCount) * 100).toFixed(1)}%)`);
-  console.log(`  ${withoutRoute} trips without routes`);
+  console.log(`\nTotal Parquet output: ${(totalParquetBytes / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`  ${totalTripCount} trips total`);
+  console.log(`  ${totalWithRoute} with routes (${((totalWithRoute / totalTripCount) * 100).toFixed(1)}%)`);
+  console.log(`  ${totalWithoutRoute} without routes`);
 
   connection.closeSync();
 
