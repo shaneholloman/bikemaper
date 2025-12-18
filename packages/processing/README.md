@@ -112,7 +112,8 @@ read_csv_auto('path/**/*.csv',
   union_by_name=true,     -- Merge columns by name across files
   normalize_names=true,   -- "Start Station Name" → start_station_name
   all_varchar=true,       -- Skip type detection, cast explicitly
-  null_padding=true       -- Handle rows with missing columns
+  null_padding=true,      -- Handle rows with missing columns
+  quote='"'               -- Handle quoted fields with commas
 )
 ```
 
@@ -122,6 +123,7 @@ read_csv_auto('path/**/*.csv',
 | `normalize_names` | Case-insensitive column matching (Title Case → snake_case) |
 | `all_varchar` | Avoid type mismatch errors in COALESCE by reading all as VARCHAR |
 | `null_padding` | Handle rows with missing columns gracefully |
+| `quote` | Parse quoted fields correctly (e.g., `"Industry City, Building 1 Basement"`) |
 
 ## Parquet Schema
 
