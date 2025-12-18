@@ -16,7 +16,7 @@
 // Resumable: If interrupted, re-run to continue from where it left off.
 import { DuckDBConnection } from "@duckdb/node-api";
 import { Database } from "bun:sqlite";
-import fs from "fs";
+import { mkdirSync, statSync } from "fs";
 import path from "path";
 import { z } from "zod";
 import { csvGlob, gitRoot, outputDir } from "./utils";
@@ -93,12 +93,13 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-function loadStations(): Map<string, Station> {
+async function loadStations(): Promise<Map<string, Station>> {
   const stationsPath = path.join(gitRoot, "apps/client/public/stations.json");
-  if (!fs.existsSync(stationsPath)) {
+  const file = Bun.file(stationsPath);
+  if (!(await file.exists())) {
     fail(`stations.json not found at ${stationsPath}. Run build-stations.ts first.`);
   }
-  const stationsFromFile: StationFromFile[] = JSON.parse(fs.readFileSync(stationsPath, "utf-8"));
+  const stationsFromFile: StationFromFile[] = await file.json();
 
   // Map station name -> coordinates
   // Include both canonical names AND aliases so we can look up historical names from CSVs
@@ -189,7 +190,7 @@ async function main() {
 
   // 1. Load stations (keyed by name)
   console.log("Loading stations.json...");
-  const stationMap = loadStations();
+  const stationMap = await loadStations();
   console.log(`  ${stationMap.size} station names loaded`);
 
   // 2. Check OSRM
@@ -199,7 +200,7 @@ async function main() {
 
   // 3. Open/create SQLite database
   console.log("Opening routes.db...");
-  fs.mkdirSync(outputDir, { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
   const db = new Database(routesDbPath);
 
   db.run(`
@@ -263,6 +264,11 @@ async function main() {
     console.warn(`  ${missingStations} pairs skipped (station name not in stations.json)`);
   }
   console.log(`  ${pairs.length} pairs to fetch`);
+
+  // Print total data loss summary
+  const totalPairs = allPairs.length;
+  const skippedPct = ((missingStations / totalPairs) * 100).toFixed(2);
+  console.log(`\nTotal data loss: ${missingStations} pairs (${skippedPct}%) skipped due to missing stations`);
 
   if (pairs.length === 0) {
     console.log("\n✅ All routes already cached!");
@@ -337,7 +343,7 @@ async function main() {
 
   // 8. Report final stats
   const countResult = db.query("SELECT COUNT(*) as count FROM routes").get() as { count: number };
-  const dbStats = fs.statSync(routesDbPath);
+  const dbStats = statSync(routesDbPath);
 
   db.close();
 

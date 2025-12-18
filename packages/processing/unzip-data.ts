@@ -5,18 +5,24 @@
 // by looping until no more zip files are found.
 
 import { execSync } from "child_process";
-import fs from "fs";
+import { readdir, stat } from "node:fs/promises";
 import path from "path";
 import { dataDir } from "./utils";
 
-function findZipFiles(dir: string): string[] {
+async function findZipFiles(dir: string): Promise<string[]> {
   const zips: string[] = [];
 
-  if (!fs.existsSync(dir)) {
+  // Check if directory exists
+  try {
+    const dirStat = await stat(dir);
+    if (!dirStat.isDirectory()) {
+      return zips;
+    }
+  } catch {
     return zips;
   }
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const entries = await readdir(dir, { withFileTypes: true });
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
@@ -25,7 +31,7 @@ function findZipFiles(dir: string): string[] {
       continue;
     }
     if (entry.isDirectory()) {
-      zips.push(...findZipFiles(fullPath));
+      zips.push(...(await findZipFiles(fullPath)));
     } else if (entry.name.endsWith(".zip")) {
       zips.push(fullPath);
     }
@@ -43,10 +49,18 @@ function unzipFile(zipPath: string): void {
   }
 }
 
-function main() {
+async function main() {
   console.log(`Scanning for .zip files in ${dataDir}...`);
 
-  if (!fs.existsSync(dataDir)) {
+  // Check if data directory exists
+  try {
+    const dirStat = await stat(dataDir);
+    if (!dirStat.isDirectory()) {
+      console.error(`Data directory not found: ${dataDir}`);
+      console.error(`Create it and add your .zip files there.`);
+      process.exit(1);
+    }
+  } catch {
     console.error(`Data directory not found: ${dataDir}`);
     console.error(`Create it and add your .zip files there.`);
     process.exit(1);
@@ -58,7 +72,8 @@ function main() {
   const processedZips = new Set<string>();
 
   while (true) {
-    const zips = findZipFiles(dataDir).filter((z) => !processedZips.has(z));
+    const allZips = await findZipFiles(dataDir);
+    const zips = allZips.filter((z) => !processedZips.has(z));
     if (zips.length === 0) break;
 
     iteration++;

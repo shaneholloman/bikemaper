@@ -2,7 +2,6 @@ import { DuckDBConnection } from "@duckdb/node-api";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import distance from "@turf/distance";
 import { point } from "@turf/helpers";
-import fs from "fs";
 import type { Feature, FeatureCollection, Polygon } from "geojson";
 import path from "path";
 import { csvGlob, dataDir, gitRoot, NYC_BOUNDS } from "./utils";
@@ -192,7 +191,7 @@ async function main() {
 
   // Load neighborhood boundaries for geocoding
   console.log("\nLoading neighborhood boundaries...");
-  const geoData = JSON.parse(fs.readFileSync(geoJsonPath, "utf-8")) as FeatureCollection<
+  const geoData = (await Bun.file(geoJsonPath).json()) as FeatureCollection<
     Polygon,
     NeighborhoodProperties
   >;
@@ -275,6 +274,16 @@ async function main() {
   } else {
     console.log("No validation issues found.");
   }
+
+  // Print total data loss summary
+  const totalLoss =
+    Number(v.null_start_name) +
+    Number(v.null_end_name) +
+    Number(v.null_start_lat) +
+    Number(v.null_end_lat) +
+    Number(v.unparseable_timestamp);
+  const lossPct = ((totalLoss / total) * 100).toFixed(2);
+  console.log(`\nTotal data loss: ${totalLoss} rows (${lossPct}%) will be skipped`);
 
   // With all_varchar=true, all columns are VARCHAR - we COALESCE first, then cast
   console.log("\nExtracting stations from temp table...");
@@ -394,7 +403,7 @@ async function main() {
 
   console.log(`Geocoded: ${matched} matched, ${unmatched} unmatched`);
 
-  fs.writeFileSync(stationsPath, JSON.stringify(stations));
+  await Bun.write(stationsPath, JSON.stringify(stations));
   console.log(`\nWrote ${stations.length} stations to ${stationsPath}`);
 
   connection.closeSync();

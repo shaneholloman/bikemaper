@@ -13,8 +13,8 @@
 // Output:
 // - output/trips/<year>-<month>.parquet for each month with data
 import { DuckDBConnection } from "@duckdb/node-api";
-import fs from "fs";
 import { globSync } from "glob";
+import { mkdir, rm, stat } from "node:fs/promises";
 import path from "path";
 import { csvGlob, dataDir, formatHumanReadableBytes, gitRoot, NYC_BOUNDS, outputDir } from "./utils";
 
@@ -94,13 +94,13 @@ async function main() {
   console.log(`Output directory: ${outputDir}`);
 
   // Ensure output directories exist
-  fs.mkdirSync(path.join(outputDir, "trips"), { recursive: true });
+  await mkdir(path.join(outputDir, "trips"), { recursive: true });
 
   const connection = await DuckDBConnection.create();
 
   // Configure DuckDB for large workloads - spill to disk instead of using 40GB RAM
   const tempDir = path.join(outputDir, "duckdb_tmp");
-  fs.mkdirSync(tempDir, { recursive: true });
+  await mkdir(tempDir, { recursive: true });
   await connection.run(`SET temp_directory = '${tempDir}'`);
   await connection.run(`SET memory_limit = '32GB'`);
   await connection.run(`SET preserve_insertion_order = false`);
@@ -117,7 +117,7 @@ async function main() {
 
   let totalBytes = 0;
   for (const filePath of matchedCsvs) {
-    totalBytes += fs.statSync(filePath).size;
+    totalBytes += (await stat(filePath)).size;
   }
 
   console.log(`Matched CSVs: ${matchedCsvs.length}`);
@@ -266,7 +266,7 @@ async function main() {
 
   // 3. Load routes from SQLite into DuckDB
   console.log("\nLoading routes from SQLite...");
-  if (!fs.existsSync(routesDbPath)) {
+  if (!(await Bun.file(routesDbPath).exists())) {
     throw new Error(`routes.db not found at ${routesDbPath}. Run build-routes.ts first.`);
   }
   await connection.run(`
@@ -284,7 +284,7 @@ async function main() {
   // Load station data from stations.json for route matching
   // Routes are keyed by station NAME (not ID) because station IDs change between years
   const stationsJsonPath = path.join(gitRoot, "apps/client/public/stations.json");
-  if (!fs.existsSync(stationsJsonPath)) {
+  if (!(await Bun.file(stationsJsonPath).exists())) {
     console.warn(`stations.json not found - trips will have no routes`);
   } else {
     // Create name normalization lookup: maps any name (canonical OR alias) -> canonical name
@@ -402,7 +402,7 @@ async function main() {
       TO '${monthPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
     `);
 
-    const monthStats = fs.statSync(monthPath);
+    const monthStats = await stat(monthPath);
     totalParquetBytes += monthStats.size;
     const elapsed = ((Date.now() - stepStart) / 1000).toFixed(1);
     console.log(`  ${monthTripCount} trips (${monthWithRoute} with routes) → ${(monthStats.size / 1024 / 1024).toFixed(1)} MB in ${elapsed}s`);
@@ -427,7 +427,7 @@ async function main() {
   connection.closeSync();
 
   // Clean up temp directory
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  await rm(tempDir, { recursive: true, force: true });
 
   const totalTime = Date.now() - startTime;
   console.log(`\nDone in ${(totalTime / 1000).toFixed(1)}s`);
