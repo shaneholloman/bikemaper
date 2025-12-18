@@ -173,7 +173,7 @@ async function getUniquePairsFromCSVs(): Promise<StationPair[]> {
     SELECT DISTINCT
       start_station_name AS startStationName,
       end_station_name AS endStationName
-    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true)
+    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true, quote='"')
     WHERE start_station_name IS NOT NULL
       AND end_station_name IS NOT NULL
       AND start_station_name != end_station_name

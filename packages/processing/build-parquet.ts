@@ -174,7 +174,7 @@ async function main() {
         CASE WHEN COALESCE(usertype, user_type) = 'Subscriber' THEN 'member' ELSE 'casual' END
       ) as member_casual
 
-    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true)
+    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true, quote='"')
   `);
 
   const loadTime = Date.now() - startTime;

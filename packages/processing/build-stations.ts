@@ -216,7 +216,7 @@ async function main() {
       -- Timestamps: modern (started_at), Title Case (start_time), legacy (starttime)
       started_at, start_time, starttime,
       ended_at, stop_time, stoptime
-    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true)
+    FROM read_csv_auto('${csvGlob}', union_by_name=true, normalize_names=true, all_varchar=true, null_padding=true, quote='"')
   `);
 
   // Validate data quality before processing
