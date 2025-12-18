@@ -11,7 +11,7 @@
 // - apps/client/public/stations.json (from build-stations.ts)
 //
 // Output:
-// - output/trips/<year>-<month>.parquet for each month with data
+// - output/parquets/<year>-<month>.parquet for each month with data
 import { DuckDBConnection } from "@duckdb/node-api";
 import { globSync } from "glob";
 import { mkdir, rm, stat } from "node:fs/promises";
@@ -94,7 +94,7 @@ async function main() {
   console.log(`Output directory: ${outputDir}`);
 
   // Ensure output directories exist
-  await mkdir(path.join(outputDir, "trips"), { recursive: true });
+  await mkdir(path.join(outputDir, "parquets"), { recursive: true });
 
   const connection = await DuckDBConnection.create();
 
@@ -394,7 +394,7 @@ async function main() {
     totalWithRoute += monthWithRoute;
 
     // Export to parquet (only trips with routes - round trips and ferry crossings are excluded)
-    const monthPath = path.join(outputDir, `trips/${month}.parquet`);
+    const monthPath = path.join(outputDir, `parquets/${month}.parquet`);
     await connection.run(`
       COPY (SELECT * FROM joined_month WHERE routeGeometry IS NOT NULL ORDER BY startedAt)
       TO '${monthPath}' (FORMAT PARQUET, COMPRESSION ZSTD)

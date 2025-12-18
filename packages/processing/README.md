@@ -75,7 +75,7 @@ bun run build-parquet.ts
 |------|-------------|
 | `apps/client/public/stations.json` | Station index with aliases, coordinates, borough/neighborhood |
 | `output/routes.db` | SQLite cache of routes keyed by station NAME |
-| `output/trips/<year>-<month>.parquet` | Monthly trip data with embedded route geometry |
+| `output/parquets/<year>-<month>.parquet` | Monthly trip data with embedded route geometry |
 
 ## How It Works
 
