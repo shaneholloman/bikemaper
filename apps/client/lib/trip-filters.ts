@@ -17,7 +17,7 @@ export function filterTrips<T extends TripWithRoute>(trips: T[]): T[] {
     // Can't be same-station trip
     if (trip.startStationName === trip.endStationName) return false;
 
-    // Speed must be 2-18 km/h
+    // Speed must be 2-32 km/h (1.2-20 mph)
     if (!trip.routeDistance) return false;
     const durationMs = trip.endedAt.getTime() - trip.startedAt.getTime();
     const durationHours = durationMs / (1000 * 60 * 60);

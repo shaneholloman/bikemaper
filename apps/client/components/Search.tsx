@@ -193,7 +193,9 @@ export function Search() {
   }
 
   const handleSelectStation = async (station: Station | StationWithDistance) => {
-    if (!parsedDate) return
+    if (!parsedDate) {
+      throw new Error("Cannot select station without a parsed date")
+    }
     setSelectedStation(station)
 
     // Initialize DuckDB if not already done
