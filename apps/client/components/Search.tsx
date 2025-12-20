@@ -28,7 +28,7 @@ type Trip = {
   routeDistance: number | null
 }
 
-type SearchStep = "station" | "datetime" | "results"
+type SearchStep = "datetime" | "station" | "results"
 
 const MAX_RESULTS = 10
 
@@ -37,7 +37,7 @@ export function Search() {
   const [search, setSearch] = React.useState("")
 
   // Multi-step flow state
-  const [step, setStep] = React.useState<SearchStep>("station")
+  const [step, setStep] = React.useState<SearchStep>("datetime")
   const [selectedStation, setSelectedStation] = React.useState<Station | null>(null)
   const [datetimeInput, setDatetimeInput] = React.useState("")
   const [trips, setTrips] = React.useState<Trip[]>([])
@@ -90,7 +90,7 @@ export function Search() {
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen)
     if (!newOpen) {
-      setStep("station")
+      setStep("datetime")
       setSelectedStation(null)
       setDatetimeInput("")
       setSearch("")
@@ -192,40 +192,43 @@ export function Search() {
     clearPicking()
   }
 
-  const handleSelectStation = (station: Station | StationWithDistance) => {
+  const handleSelectStation = async (station: Station | StationWithDistance) => {
+    if (!parsedDate) return
     setSelectedStation(station)
+
+    // Initialize DuckDB if not already done
+    await duckdbService.init()
+
+    const rawTrips = await duckdbService.getTripsFromStation({
+      startStationName: station.name,
+      datetime: parsedDate,
+      intervalSeconds: 1800,
+    })
+
+    // Filter trips (must have route, valid speed, etc.)
+    const filtered = filterTrips(rawTrips)
+    console.log("Trips from station:", filtered)
+    setTrips(filtered)
+    setStep("results")
+  }
+
+  // From station step, go back to datetime step
+  const handleBackToDatetime = () => {
     setStep("datetime")
     setSearch("")
   }
 
+  // From results step, go back to station step
   const handleBackToStation = () => {
     setStep("station")
     setSelectedStation(null)
-    setDatetimeInput("")
     setTrips([])
+    setResultsSearch("")
   }
 
-  const handleBackToDatetime = () => {
-    setStep("datetime")
-    setTrips([])
-  }
-
-  const handleConfirmSelection = async () => {
-    if (selectedStation && parsedDate) {
-      // Initialize DuckDB if not already done
-      await duckdbService.init()
-
-      const rawTrips = await duckdbService.getTripsFromStation({
-        startStationName: selectedStation.name,
-        datetime: parsedDate,
-        intervalSeconds: 1800,
-      })
-
-      // Filter trips (must have route, valid speed, etc.)
-      const filtered = filterTrips(rawTrips)
-      console.log("Trips from station:", filtered)
-      setTrips(filtered)
-      setStep("results")
+  const handleConfirmDatetime = () => {
+    if (parsedDate) {
+      setStep("station")
     }
   }
 
@@ -262,20 +265,10 @@ export function Search() {
     handleOpenChange(false)
   }
 
-  // Render datetime step
-  if (step === "datetime" && selectedStation) {
+  // Render datetime step (first step - no station selected yet)
+  if (step === "datetime") {
     return (
       <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false} className="sm:max-w-xl">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <button
-            onClick={handleBackToStation}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <Bike className="size-4 text-muted-foreground" />
-          <span className="font-medium">{selectedStation.name}</span>
-        </div>
         <CommandInput
           autoFocus
           placeholder="When did this ride start?"
@@ -286,12 +279,78 @@ export function Search() {
         <CommandList>
           {parsedDate && (
             <CommandGroup>
-              <CommandItem onSelect={handleConfirmSelection} className="bg-accent">
+              <CommandItem onSelect={handleConfirmDatetime} className="bg-accent">
                 <ArrowRight className="size-4" />
                 {formatDateTime(parsedDate)}
               </CommandItem>
             </CommandGroup>
           )}
+        </CommandList>
+      </CommandDialog>
+    )
+  }
+
+  // Render station step (after datetime confirmed)
+  if (step === "station" && parsedDate) {
+    return (
+      <CommandDialog open={open} onOpenChange={handleOpenChange} className="sm:max-w-xl" shouldFilter={false}>
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <button
+            onClick={handleBackToDatetime}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <CalendarSearch className="size-4 text-muted-foreground" />
+          <span className="font-medium">{formatDateTime(parsedDate)}</span>
+        </div>
+        <CommandInput
+          placeholder={pickedLocation ? "Filter nearby stations..." : "Type a station name..."}
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList className="max-h-[500px]">
+          <CommandEmpty>No results found.</CommandEmpty>
+          {!search.trim() && (
+            <>
+              <CommandGroup heading="Actions">
+                {pickedLocation ? (
+                  <CommandItem onSelect={handleClearLocation}>
+                    <X className="size-4" />
+                    Clear picked location
+                  </CommandItem>
+                ) : (
+                  <CommandItem onSelect={handlePickFromMap}>
+                    <MapPin className="size-4" />
+                    Pick location from map
+                  </CommandItem>
+                )}
+              </CommandGroup>
+              <CommandSeparator />
+            </>
+          )}
+          <CommandGroup heading={pickedLocation ? "Nearest Stations" : "Citibike Stations"}>
+            {filteredStations.map((station) => (
+              <CommandItem
+                key={station.name}
+                value={station.name}
+                onSelect={() => handleSelectStation(station)}
+              >
+                <Bike className="size-4" />
+                <div className="flex flex-col flex-1">
+                  <span>{station.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {getStationRegionLabel(station)}
+                  </span>
+                </div>
+                {"distance" in station && (
+                  <span className="text-muted-foreground text-xs">
+                    {formatDistance(station.distance)}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
         </CommandList>
       </CommandDialog>
     )
@@ -303,7 +362,7 @@ export function Search() {
       <CommandDialog open={open} onOpenChange={handleOpenChange} className="sm:max-w-xl" shouldFilter={false}>
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
-            onClick={handleBackToDatetime}
+            onClick={handleBackToStation}
             className="text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="size-4" />
@@ -349,57 +408,6 @@ export function Search() {
     )
   }
 
-  // Render station step (default)
-  return (
-    <CommandDialog open={open} onOpenChange={handleOpenChange} className="sm:max-w-xl" shouldFilter={false}>
-      <CommandInput
-        placeholder={pickedLocation ? "Filter nearby stations..." : "Type a station name..."}
-        value={search}
-        onValueChange={setSearch}
-      />
-      <CommandList className="max-h-[500px]">
-        <CommandEmpty>No results found.</CommandEmpty>
-        {!search.trim() && (
-          <>
-            <CommandGroup heading="Actions">
-              {pickedLocation ? (
-                <CommandItem onSelect={handleClearLocation}>
-                  <X className="size-4" />
-                  Clear picked location
-                </CommandItem>
-              ) : (
-                <CommandItem onSelect={handlePickFromMap}>
-                  <MapPin className="size-4" />
-                  Pick location from map
-                </CommandItem>
-              )}
-            </CommandGroup>
-            <CommandSeparator />
-          </>
-        )}
-        <CommandGroup heading={pickedLocation ? "Nearest Stations" : "Citibike Stations"}>
-          {filteredStations.map((station) => (
-            <CommandItem
-              key={station.name}
-              value={station.name}
-              onSelect={() => handleSelectStation(station)}
-            >
-              <Bike className="size-4" />
-              <div className="flex flex-col flex-1">
-                <span>{station.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {getStationRegionLabel(station)}
-                </span>
-              </div>
-              {"distance" in station && (
-                <span className="text-muted-foreground text-xs">
-                  {formatDistance(station.distance)}
-                </span>
-              )}
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </CommandList>
-    </CommandDialog>
-  )
+  // Fallback (shouldn't reach here in normal flow)
+  return null
 }
