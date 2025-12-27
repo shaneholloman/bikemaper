@@ -347,28 +347,30 @@ export function Search() {
               <CommandSeparator />
             </>
           )}
-          <CommandGroup heading={pickedLocation ? "Nearest Stations" : "Citibike Stations"}>
-            {filteredStations.map((station) => (
-              <CommandItem
-                key={station.name}
-                value={station.name}
-                onSelect={() => handleSelectStation(station)}
-              >
-                <Bike className="size-4" />
-                <div className="flex flex-col flex-1">
-                  <span>{station.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {getStationRegionLabel(station)}
-                  </span>
-                </div>
-                {"distance" in station && (
-                  <span className="text-muted-foreground text-xs">
-                    {formatDistance(station.distance)}
-                  </span>
-                )}
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          {filteredStations.length > 0 && (
+            <CommandGroup heading={pickedLocation ? "Nearest Stations" : "Citibike Stations"}>
+              {filteredStations.map((station) => (
+                <CommandItem
+                  key={station.name}
+                  value={station.name}
+                  onSelect={() => handleSelectStation(station)}
+                >
+                  <Bike className="size-4" />
+                  <div className="flex flex-col flex-1">
+                    <span>{station.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {getStationRegionLabel(station)}
+                    </span>
+                  </div>
+                  {"distance" in station && (
+                    <span className="text-muted-foreground text-xs">
+                      {formatDistance(station.distance)}
+                    </span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
         </CommandList>
       </CommandDialog>
     )
@@ -385,9 +387,10 @@ export function Search() {
           >
             <ArrowLeft className="size-4" />
           </button>
-          {isLoadingTrips && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
           <span className="font-medium truncate">{selectedStation.name}</span>
-          {!isLoadingTrips && (
+          {isLoadingTrips ? (
+            <Loader2 className="size-4 animate-spin text-muted-foreground shrink-0" />
+          ) : (
             <span className="text-muted-foreground shrink-0">
               · {trips.length} ride{trips.length !== 1 ? "s" : ""}
             </span>
