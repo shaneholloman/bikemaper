@@ -16,12 +16,12 @@ import { createThrottledSampler } from "@/lib/misc";
 import { useAnimationStore } from "@/lib/stores/animation-store";
 import { usePickerStore } from "@/lib/stores/location-picker-store";
 import { useSearchStore } from "@/lib/stores/search-store";
-import { useStationsStore } from "@/lib/stores/stations-store";
+import { useStationsStore, type Station } from "@/lib/stores/stations-store";
 import type { GraphDataPoint, Phase, ProcessedTrip } from "@/lib/trip-types";
 import { TripDataService } from "@/services/trip-data-service";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
-import { IconLayer, PathLayer, SolidPolygonLayer } from "@deck.gl/layers";
+import { IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from "@deck.gl/layers";
 import { DeckGL } from "@deck.gl/react";
 import { Pause, Play, Search, Shuffle } from "lucide-react";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -307,7 +307,7 @@ export const BikeMap = () => {
   const [bearing, setBearing] = useState(0);
 
   const { isPickingLocation, setPickedLocation, pickedLocation } = usePickerStore();
-  const { getStation, load: loadStations } = useStationsStore();
+  const { getStation, load: loadStations, stations } = useStationsStore();
   const openSearch = useSearchStore((s) => s.open);
 
   // Detect Mac vs Windows/Linux for keyboard shortcut display
@@ -564,6 +564,13 @@ export const BikeMap = () => {
     storePause();
   }, [storePause]);
 
+  // Pause animation when entering picking mode
+  useEffect(() => {
+    if (isPickingLocation && rafRef.current) {
+      pause();
+    }
+  }, [isPickingLocation, pause]);
+
   // Toggle play/pause based on current state
   const togglePlayPause = useCallback(() => {
     if (animStateRef.current === "idle") {
@@ -724,6 +731,32 @@ export const BikeMap = () => {
   }, [selectedTripId]);
 
   const layers = useMemo(() => {
+    // Show station dots when picking a location (GPU-accelerated)
+    if (isPickingLocation) {
+      return [
+        // Glow effect layer (larger, semi-transparent)
+        new ScatterplotLayer<Station>({
+          id: "stations-glow",
+          data: stations,
+          getPosition: (d) => [d.longitude, d.latitude],
+          getFillColor: [125, 207, 255, 60],
+          getRadius: 6,
+          radiusUnits: "pixels",
+          pickable: false,
+        }),
+        // Core dot layer
+        new ScatterplotLayer<Station>({
+          id: "stations",
+          data: stations,
+          getPosition: (d) => [d.longitude, d.latitude],
+          getFillColor: [125, 207, 255, 255],
+          getRadius: 2,
+          radiusUnits: "pixels",
+          pickable: false,
+        }),
+      ];
+    }
+
     const hasSelection = selectedTripData.length > 0;
 
     return [
@@ -822,7 +855,7 @@ export const BikeMap = () => {
           ]
         : []),
     ];
-  }, [activeTrips, time, selectedTripId, selectedTripData]);
+  }, [activeTrips, time, selectedTripId, selectedTripData, isPickingLocation, stations]);
 
   const handleMapClick = useCallback(
     (info: { coordinate?: number[] }) => {
