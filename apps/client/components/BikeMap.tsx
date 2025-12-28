@@ -27,6 +27,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap, Marker } from "react-map-gl/mapbox";
 import { ActiveRidesPanel } from "./ActiveRidesPanel";
+import { MapControlButton } from "./MapControlButton";
 import { SelectedTripPanel } from "./SelectedTripPanel";
 import { TimeDisplay } from "./TimeDisplay";
 
@@ -824,39 +825,27 @@ export const BikeMap = () => {
         <div className="fixed bottom-8 right-3 z-20 sm:static sm:z-auto flex flex-col items-end sm:items-start gap-1 pointer-events-auto">
           {/* Play/Pause button */}
           {animState === "idle" ? (
-            <button
-              onClick={play}
-              className="flex items-center gap-1.5 bg-black/45 hover:bg-black/65 text-white/90 text-sm font-medium pl-2 pr-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md transition-colors shadow-[0_0_20px_rgba(0,0,0,0.6)]"
-            >
+            <MapControlButton onClick={play}>
               <Play className="w-4 h-4" />
               Play
-            </button>
+            </MapControlButton>
           ) : isPlaying ? (
-            <button
-              onClick={pause}
-              className="flex items-center gap-1.5 bg-black/45 hover:bg-black/65 text-white/90 text-sm font-medium pl-2 pr-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md transition-colors shadow-[0_0_20px_rgba(0,0,0,0.6)]"
-            >
+            <MapControlButton onClick={pause}>
               <Pause className="w-4 h-4" />
               Pause
-            </button>
+            </MapControlButton>
           ) : (
-            <button
-              onClick={resume}
-              className="flex items-center gap-1.5 bg-black/45 hover:bg-black/65 text-white/90 text-sm font-medium pl-2 pr-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md transition-colors shadow-[0_0_20px_rgba(0,0,0,0.6)]"
-            >
+            <MapControlButton onClick={resume}>
               <Play className="w-4 h-4" />
               Play
-            </button>
+            </MapControlButton>
           )}
           {/* Random button - only when animation has started */}
           {animState === "playing" && (
-            <button
-              onClick={selectRandomBiker}
-              className="flex items-center gap-1.5 bg-black/45 hover:bg-black/65 text-white/90 text-sm font-medium pl-2 pr-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md transition-colors"
-            >
+            <MapControlButton onClick={selectRandomBiker}>
               <Shuffle className="w-4 h-4" />
               Random
-            </button>
+            </MapControlButton>
           )}
         </div>
 
