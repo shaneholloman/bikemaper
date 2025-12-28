@@ -666,10 +666,10 @@ export const BikeMap = () => {
       // Ignore if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      if (e.key.toLowerCase() === "p") {
+      if (e.key.toLowerCase() === "p" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         togglePlayPause();
-      } else if (e.key.toLowerCase() === "r") {
+      } else if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         selectRandomBiker();
       }
@@ -700,10 +700,7 @@ export const BikeMap = () => {
         continue;
       }
       updateTripState(trip, time, fadeDurationSimSeconds);
-      // Only set isSelected if there's actually a selection (avoid work when no selection)
-      if (selectedTripId !== null) {
-        trip.isSelected = trip.id === selectedTripId;
-      }
+      trip.isSelected = trip.id === selectedTripId;
     }
   }, [activeTrips, time, selectedTripId, fadeDurationSimSeconds]);
 
@@ -788,7 +785,7 @@ export const BikeMap = () => {
               getColor: getSelectedPathColor,
               getWidth: 4,
               widthMinPixels: 2,
-              opacity: 0.8,
+              opacity: 0.75,
               pickable: false,
               updateTriggers: {
                 getColor: [time],
