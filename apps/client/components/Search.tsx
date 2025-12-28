@@ -204,6 +204,8 @@ export function Search() {
     // Optimistically transition to results step
     setSelectedStation(station)
     setTrips([]) // Clear previous results
+    setSearch("") // Clear search input
+    setResultsSearch("") // Clear results search for fresh input
     setStep("results")
     setIsLoadingTrips(true)
 
@@ -241,10 +243,12 @@ export function Search() {
     setSelectedStation(null)
     setTrips([])
     setResultsSearch("")
+    setSearch("") // Clear station search for fresh input
   }
 
   const handleConfirmDatetime = () => {
     if (parsedDate) {
+      setSearch("") // Clear station search for fresh input
       setStep("station")
     }
   }
@@ -405,14 +409,8 @@ export function Search() {
         <CommandList className="max-h-[500px]">
           {/* Empty state - no results after loading */}
           {!isLoadingTrips && trips.length === 0 && (
-            <div className="flex flex-col items-center gap-2 py-8 max-w-sm mx-auto">
-              <div className="text-center">
-                <p className="font-medium">No trips found</p>
-                <p className="text-sm text-muted-foreground">
-                  No rides started from {selectedStation.name} within ±{SEARCH_WINDOW_MS / 60000} min of{" "}
-                  {formatDateTime(parsedDate!)}
-                </p>
-              </div>
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              No results found.
             </div>
           )}
 
@@ -451,12 +449,8 @@ export function Search() {
 
           {/* Filtered empty state - has trips but filter returned nothing */}
           {!isLoadingTrips && trips.length > 0 && filteredTrips.length === 0 && (
-            <div className="flex flex-col items-center gap-2 py-8">
-              <div className="text-center">
-                <p className="text-sm text-muted-foreground">
-                No trips match your search.
-                </p>
-              </div>
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              No results found.
             </div>
           )}
         </CommandList>
