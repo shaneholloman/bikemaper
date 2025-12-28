@@ -1,12 +1,16 @@
 import { GRAPH_MIN_SCALE, GRAPH_WINDOW_SIZE_SECONDS } from "@/lib/config";
 import type { GraphDataPoint } from "@/lib/trip-types";
-import { forwardRef, memo, useMemo } from "react";
+import { forwardRef, memo, useImperativeHandle, useMemo, useRef } from "react";
 
 type ActiveRidesPanelProps = {
-  tripCount: number;
   graphData: GraphDataPoint[];
   currentTime: number;
   bearing: number;
+};
+
+export type ActiveRidesPanelRef = {
+  fps: HTMLDivElement | null;
+  rides: HTMLSpanElement | null;
 };
 
 const GRAPH_WIDTH = 176;
@@ -14,10 +18,18 @@ const GRAPH_HEIGHT = 52;
 const PADDING = { top: 4, right: 4, bottom: 14, left: 4 };
 
 export const ActiveRidesPanel = memo(
-  forwardRef<HTMLDivElement, ActiveRidesPanelProps>(function ActiveRidesPanel(
-    { tripCount, graphData, currentTime, bearing },
-    fpsRef
+  forwardRef<ActiveRidesPanelRef, ActiveRidesPanelProps>(function ActiveRidesPanel(
+    { graphData, currentTime, bearing },
+    ref
   ) {
+    const fpsRef = useRef<HTMLDivElement>(null);
+    const ridesRef = useRef<HTMLSpanElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      fps: fpsRef.current,
+      rides: ridesRef.current,
+    }));
+
     const { linePath, areaPath, maxCount } = useMemo(() => {
       if (graphData.length === 0) {
         return { linePath: "", areaPath: "", maxCount: 0 };
@@ -79,7 +91,7 @@ export const ActiveRidesPanel = memo(
           </svg>
         </div>
         <div className="mt-0.5 flex items-baseline gap-1.5 text-left">
-          <span className="text-xl font-semibold tabular-nums">{tripCount.toLocaleString()}</span>
+          <span ref={ridesRef} className="text-xl font-semibold tabular-nums">--</span>
           <span className="text-[10px] tracking-wide text-white/70">RIDES</span>
         </div>
         <div ref={fpsRef} className="mt-0.5 text-[10px] tracking-wide text-white/50 text-left">-- FPS</div>

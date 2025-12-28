@@ -290,7 +290,6 @@ export const BikeMap = () => {
   const fadeDurationSimSeconds = (FADE_DURATION_MS / 1000) * speedup;
 
   const [activeTrips, setActiveTrips] = useState<ProcessedTrip[]>([]);
-  const [tripCount, setTripCount] = useState(0);
   const [animState, setAnimState] = useState<AnimationState>("idle");
   const [initialViewState, setInitialViewState] = useState<MapViewState>(INITIAL_VIEW_STATE);
   const [graphData, setGraphData] = useState<GraphDataPoint[]>([]);
@@ -334,7 +333,7 @@ export const BikeMap = () => {
 
   const rafRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
-  const fpsRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<{ fps: HTMLDivElement | null; rides: HTMLSpanElement | null }>(null);
   const smoothedFpsRef = useRef(60);
   const tripMapRef = useRef<Map<string, ProcessedTrip>>(new Map());
   const loadingChunksRef = useRef<Set<number>>(new Set());
@@ -342,7 +341,7 @@ export const BikeMap = () => {
   const lastChunkRef = useRef(-1);
   const lastBatchRef = useRef(-1);
   const serviceRef = useRef<TripDataService | null>(null);
-  const graphSamplerRef = useRef(createThrottledSampler({ intervalMs: 60 }));
+  const graphSamplerRef = useRef(createThrottledSampler({ intervalMs: 100 }));
   const fpsSamplerRef = useRef(createThrottledSampler({ intervalMs: 100 }));
   const cameraSamplerRef = useRef(createThrottledSampler({ intervalMs: CAMERA_POLLING_INTERVAL_MS }));
 
@@ -411,7 +410,6 @@ export const BikeMap = () => {
 
       // Update state for initial render
       setActiveTrips(Array.from(tripMapRef.current.values()));
-      setTripCount(tripMapRef.current.size);
     };
 
     initService();
@@ -462,7 +460,6 @@ export const BikeMap = () => {
     // Sync state for rendering
     const currentTrips = Array.from(tripMapRef.current.values());
     setActiveTrips(currentTrips);
-    setTripCount(currentTrips.length);
   }, [currentChunk, animState, loadUpcomingRides, time]);
 
   // Start the animation loop (used by both play and resume)
@@ -477,8 +474,11 @@ export const BikeMap = () => {
         const currentFps = 1000 / rawDeltaMs;
         smoothedFpsRef.current = smoothedFpsRef.current * 0.9 + currentFps * 0.1;
         fpsSamplerRef.current.sample(() => {
-          if (fpsRef.current) {
-            fpsRef.current.textContent = `${Math.round(smoothedFpsRef.current)} FPS`;
+          if (panelRef.current?.fps) {
+            panelRef.current.fps.textContent = `${Math.round(smoothedFpsRef.current)} FPS`;
+          }
+          if (panelRef.current?.rides) {
+            panelRef.current.rides.textContent = tripMapRef.current.size.toLocaleString();
           }
         });
 
@@ -590,7 +590,6 @@ export const BikeMap = () => {
     graphSamplerRef.current.reset();
     fpsSamplerRef.current.reset();
     setActiveTrips([]);
-    setTripCount(0);
     setAnimState("idle");
     setGraphData([]);
 
@@ -619,7 +618,6 @@ export const BikeMap = () => {
       lastBatchRef.current = 0;
 
       setActiveTrips(Array.from(tripMapRef.current.values()));
-      setTripCount(tripMapRef.current.size);
 
       if (selectedTripId) {
         play();
@@ -910,7 +908,7 @@ export const BikeMap = () => {
 
         {/* Stats - right */}
         <div className="pointer-events-none">
-          <ActiveRidesPanel ref={fpsRef} tripCount={tripCount} graphData={graphData} currentTime={time} bearing={bearing} />
+          <ActiveRidesPanel ref={panelRef} graphData={graphData} currentTime={time} bearing={bearing} />
           {selectedTripInfo && <SelectedTripPanel info={selectedTripInfo} />}
         </div>
       </div>
