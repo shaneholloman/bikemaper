@@ -356,6 +356,20 @@ export const BikeMap = () => {
   const fpsSamplerRef = useRef(createThrottledSampler({ intervalMs: 100 }));
   const cameraSamplerRef = useRef(createThrottledSampler({ intervalMs: CAMERA_POLLING_INTERVAL_MS }));
 
+  // Button refs for keyboard shortcut animations
+  const playPauseButtonRef = useRef<HTMLButtonElement>(null);
+  const randomButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Helper to trigger button press animation
+  const triggerButtonAnimation = useCallback((ref: React.RefObject<HTMLButtonElement | null>) => {
+    const button = ref.current;
+    if (!button) return;
+    button.style.transform = "scale(0.95)";
+    setTimeout(() => {
+      button.style.transform = "";
+    }, 100);
+  }, []);
+
   // Get chunk index from simulation time (seconds)
   const getChunkIndex = useCallback(
     (timeSeconds: number) => Math.floor(timeSeconds / CHUNK_SIZE_SECONDS),
@@ -687,15 +701,17 @@ export const BikeMap = () => {
       if (e.key === " " && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         togglePlayPause();
+        triggerButtonAnimation(playPauseButtonRef);
       } else if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         selectRandomBiker();
+        triggerButtonAnimation(randomButtonRef);
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlayPause, selectRandomBiker]);
+  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -925,7 +941,7 @@ export const BikeMap = () => {
           </MapControlButton>
           {/* Play/Pause button */}
           {animState === "idle" ? (
-            <MapControlButton onClick={play}>
+            <MapControlButton ref={playPauseButtonRef} onClick={play}>
               <span className="flex items-center gap-1.5">
                 <Play className="w-4 h-4" />
                 Play
@@ -933,7 +949,7 @@ export const BikeMap = () => {
               <Kbd className="bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           ) : isPlaying ? (
-            <MapControlButton onClick={pause}>
+            <MapControlButton ref={playPauseButtonRef} onClick={pause}>
               <span className="flex items-center gap-1.5">
                 <Pause className="w-4 h-4" />
                 Pause
@@ -941,7 +957,7 @@ export const BikeMap = () => {
               <Kbd className="bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           ) : (
-            <MapControlButton onClick={resume}>
+            <MapControlButton ref={playPauseButtonRef} onClick={resume}>
               <span className="flex items-center gap-1.5">
                 <Play className="w-4 h-4" />
                 Play
@@ -950,7 +966,7 @@ export const BikeMap = () => {
             </MapControlButton>
           )}
           {/* Random button */}
-          <MapControlButton onClick={selectRandomBiker}>
+          <MapControlButton ref={randomButtonRef} onClick={selectRandomBiker}>
             <span className="flex items-center gap-1.5">
               <Shuffle className="w-4 h-4" />
               Random
