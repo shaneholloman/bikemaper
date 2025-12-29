@@ -19,7 +19,7 @@ import { useSearchStore } from "@/lib/stores/search-store";
 import { useStationsStore, type Station } from "@/lib/stores/stations-store";
 import type { GraphDataPoint, Phase, ProcessedTrip } from "@/lib/trip-types";
 import { TripDataService } from "@/services/trip-data-service";
-import { DataFilterExtension } from "@deck.gl/extensions";
+import { DataFilterExtension, DataFilterExtensionProps } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from "@deck.gl/layers";
 import { DeckGL } from "@deck.gl/react";
@@ -762,7 +762,8 @@ export const BikeMap = () => {
 
     return [
       // Trips layer - dimmed when selection active
-      new TripsLayer<ProcessedTrip>({
+      // Uses DataFilterExtension to GPU-filter trips by visibility window
+      new TripsLayer<ProcessedTrip, DataFilterExtensionProps<ProcessedTrip>>({
         id: "trips",
         data: activeTrips,
         getPath,
@@ -775,6 +776,11 @@ export const BikeMap = () => {
         trailLength: TRAIL_LENGTH_SECONDS,
         currentTime: time,
         pickable: false,
+        // GPU-based visibility filtering - only render trips where:
+        // visibleStartSeconds <= time AND visibleEndSeconds >= time
+        extensions: [dataFilter],
+        getFilterValue,
+        filterRange: [[-Infinity, time], [time, Infinity]],
         updateTriggers: {
           getColor: [selectedTripId],
         },
