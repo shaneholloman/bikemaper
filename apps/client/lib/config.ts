@@ -8,6 +8,10 @@ import { Color } from "@deck.gl/core";
 // Sept 11, 2025 4:50pm EDT = 1 hour before peak (4,913 concurrent at 5:50pm)
 export const DEFAULT_ANIMATION_START_DATE = new Date("2025-09-11T20:50:00.000Z");
 
+// Valid data range for Citi Bike data
+export const DATA_START_DATE = new Date("2013-06-01T00:00:00Z");
+export const DATA_END_DATE = new Date("2025-12-31T23:59:59Z");
+
 // Default speedup multiplier for animation
 export const DEFAULT_SPEEDUP = 150;
 

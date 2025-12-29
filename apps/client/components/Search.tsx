@@ -3,13 +3,14 @@ import { EBike } from "@/components/icons/Ebike"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
 import { Kbd } from "@/components/ui/kbd"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FADE_DURATION_MS } from "@/lib/config"
+import { DATA_END_DATE, DATA_START_DATE, FADE_DURATION_MS } from "@/lib/config"
 import { formatDateTime, formatDateTimeFull, formatDistance, formatDurationMinutes } from "@/lib/format"
 import { useAnimationStore } from "@/lib/stores/animation-store"
 import { usePickerStore } from "@/lib/stores/location-picker-store"
 import { useSearchStore } from "@/lib/stores/search-store"
 import { useStationsStore, type Station } from "@/lib/stores/stations-store"
 import { filterTrips } from "@/lib/trip-filters"
+import { cn } from "@/lib/utils"
 import { duckdbService } from "@/services/duckdb-service"
 import distance from "@turf/distance"
 import { point } from "@turf/helpers"
@@ -64,6 +65,9 @@ export function Search() {
     if (!datetimeInput.trim()) return null
     return chrono.parseDate(datetimeInput, animationStartDate)
   }, [datetimeInput, animationStartDate])
+
+  // Check if parsed date is outside available data range
+  const isDateOutOfRange = !!parsedDate && (parsedDate < DATA_START_DATE || parsedDate > DATA_END_DATE)
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -335,7 +339,7 @@ export function Search() {
         </div>
         <CommandInput
           autoFocus
-          placeholder={mode === "ride" ? "When did this ride start?" : "What date and time are you looking for?"}
+          placeholder={mode === "ride" ? "When did this ride start?" : "What time do you want to jump to?"}
           value={datetimeInput}
           onValueChange={setDatetimeInput}
           icon={mode === "ride" ? <SearchIcon className="size-4 shrink-0 text-muted-foreground" /> : <CalendarSearch className="size-4 shrink-0 text-muted-foreground" />}
@@ -348,12 +352,18 @@ export function Search() {
           {parsedDate && (
             <CommandGroup>
               <CommandItem
-                onSelect={mode === "ride" ? handleConfirmDatetime : handleJumpToTime}
-                className="bg-accent"
+                onSelect={isDateOutOfRange ? undefined : (mode === "ride" ? handleConfirmDatetime : handleJumpToTime)}
+                className={cn("bg-accent", isDateOutOfRange && "cursor-not-allowed")}
+                disabled={isDateOutOfRange}
               >
                 <ArrowRight className="size-4" />
                 {formatDateTime(parsedDate)}
               </CommandItem>
+              {isDateOutOfRange && (
+                <div className="px-3 py-2 text-xs text-zinc-400">
+                  No data available for this date.
+                </div>
+              )}
             </CommandGroup>
           )}
         </CommandList>
