@@ -363,7 +363,7 @@ export function Search() {
           icon={mode === "ride" ? <SearchIcon className="size-4 shrink-0 text-muted-foreground" /> : <CalendarSearch className="size-4 shrink-0 text-muted-foreground" />}
         />
         <div className="px-3 py-2 text-xs text-zinc-500 flex flex-col gap-0.5">
-          <span>Current processed <a href="https://citibikenyc.com/" target="_blank" className="underline hover:text-zinc-50 text-zinc-300 font-medium">Citi Bike</a> data spans June 2013 – December 2025.</span>
+          <span>Processed <a href="https://citibikenyc.com/" target="_blank" className="underline hover:text-zinc-50 text-zinc-300 font-medium">Citi Bike</a> data spans June 2013 – December 2025.</span>
           <span>{'Try "July 4th 2019 at 8pm" or "Fri 4pm"'}</span>
         </div>
         <CommandList>
