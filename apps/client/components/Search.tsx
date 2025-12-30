@@ -91,6 +91,25 @@ export function Search() {
     return () => document.removeEventListener("keydown", down)
   }, [toggle, isOpen, step])
 
+  // Handle Esc key: go back to previous step instead of closing dialog
+  const handleEscapeKeyDown = React.useCallback((e: KeyboardEvent) => {
+    if (step === "station") {
+      e.preventDefault()
+      setStep("datetime")
+      setSearch("")
+      focusInput()
+    } else if (step === "results") {
+      e.preventDefault()
+      setStep("station")
+      setSelectedStation(null)
+      setTrips([])
+      setResultsSearch("")
+      setSearch("")
+      focusInput()
+    }
+    // step === "datetime" falls through to default dialog close behavior
+  }, [step])
+
   React.useEffect(() => {
     loadStations()
   }, [loadStations])
@@ -336,7 +355,7 @@ export function Search() {
   // Render datetime step (first step - no station selected yet)
   if (step === "datetime") {
     return (
-      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} shouldFilter={false} className="sm:max-w-xl">
+      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} shouldFilter={false} className="sm:max-w-xl">
         <div className="flex items-center px-3 py-2 border-b">
           <Tabs value={mode} onValueChange={(v) => setMode(v as SearchMode)} >
             <TabsList className="bg-[#1c1c1f]">
@@ -405,7 +424,7 @@ export function Search() {
   // Render station step (after datetime confirmed)
   if (step === "station" && parsedDate) {
     return (
-      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} className="sm:max-w-xl" shouldFilter={false}>
+      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} className="sm:max-w-xl" shouldFilter={false}>
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
             onClick={handleBackToDatetime}
@@ -480,7 +499,7 @@ export function Search() {
   // Render results step
   if (step === "results" && selectedStation) {
     return (
-      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} className="sm:max-w-xl" shouldFilter={false}>
+      <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} className="sm:max-w-xl" shouldFilter={false}>
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <button
             onClick={handleBackToStation}
