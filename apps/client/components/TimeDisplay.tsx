@@ -41,6 +41,7 @@ export function TimeDisplay({ simulationTime, startDate }: Props) {
                   }}
                   transition={{
                     duration: 0.8,
+                    repeatDelay: 0.15,
                     repeat: Infinity,
                     ease: "linear",
                   }}
