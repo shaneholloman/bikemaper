@@ -25,6 +25,9 @@ type AnimationStore = {
   currentTime: number // simulation seconds from windowStart
   pendingAutoPlay: boolean // flag to auto-play after trips load
 
+  // Loading state
+  isLoadingTrips: boolean
+
   // Trip selection (shared between Search and BikeMap)
   selectedTripId: string | null
   selectedTripInfo: SelectedTripInfo | null
@@ -40,6 +43,7 @@ type AnimationStore = {
   advanceTime: (delta: number) => void
   resetPlayback: () => void
   selectTrip: (data: { id: string; info?: SelectedTripInfo | null } | null) => void
+  setIsLoadingTrips: (loading: boolean) => void
 }
 
 export const useAnimationStore = create<AnimationStore>((set) => ({
@@ -51,6 +55,9 @@ export const useAnimationStore = create<AnimationStore>((set) => ({
   isPlaying: false,
   currentTime: 0,
   pendingAutoPlay: false,
+
+  // Loading state
+  isLoadingTrips: false,
 
   // Trip selection
   selectedTripId: null,
@@ -80,4 +87,7 @@ export const useAnimationStore = create<AnimationStore>((set) => ({
       selectedTripInfo: data?.info ?? null,
     });
   },
+
+  // Loading state
+  setIsLoadingTrips: (isLoadingTrips) => set({ isLoadingTrips }),
 }))

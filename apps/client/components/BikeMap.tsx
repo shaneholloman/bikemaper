@@ -418,6 +418,8 @@ export const BikeMap = () => {
     initialLoadDone.current = true;
 
     const initService = async () => {
+      useAnimationStore.getState().setIsLoadingTrips(true);
+
       const service = new TripDataService({
         windowStartMs,
         animationStartDate,
@@ -438,6 +440,7 @@ export const BikeMap = () => {
 
       // Update state for initial render
       setActiveTrips(Array.from(tripMapRef.current.values()));
+      useAnimationStore.getState().setIsLoadingTrips(false);
     };
 
     initService();
@@ -629,6 +632,8 @@ export const BikeMap = () => {
 
     // Recreate service with new config
     const recreateService = async () => {
+      useAnimationStore.getState().setIsLoadingTrips(true);
+
       // Terminate old service
       serviceRef.current?.terminate();
 
@@ -652,6 +657,7 @@ export const BikeMap = () => {
       lastBatchRef.current = 0;
 
       setActiveTrips(Array.from(tripMapRef.current.values()));
+      useAnimationStore.getState().setIsLoadingTrips(false);
 
       // Auto-play if requested (from TimeDisplay or trip selection)
       const { pendingAutoPlay, clearPendingAutoPlay } = useAnimationStore.getState();
