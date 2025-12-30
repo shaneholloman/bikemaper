@@ -1,6 +1,5 @@
 import { formatDateShort, formatTimeOnly } from "@/lib/format";
 import { useAnimationStore } from "@/lib/stores/animation-store";
-import { Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 type Props = {
@@ -24,7 +23,30 @@ export function TimeDisplay({ simulationTime, startDate }: Props) {
             transition={{ duration: 0.15, ease: "easeInOut" }}
             className="absolute inset-0 flex items-center justify-center"
           >
-            <Loader2 className="size-6 animate-spin text-white/70" />
+            <div className="relative">
+              <div className="w-20 h-[2px] rounded-full bg-white/10" />
+              <div
+                className="absolute -inset-x-6 -top-5 -bottom-5"
+                style={{
+                  maskImage:
+                    "linear-gradient(to right, transparent 20%, black 35%, black 65%, transparent 80%)",
+                  WebkitMaskImage:
+                    "linear-gradient(to right, transparent 20%, black 35%, black 65%, transparent 80%)",
+                }}
+              >
+                <motion.div
+                  className="absolute left-6 top-1/2 -translate-y-1/2 h-[2px] w-6 rounded-full bg-zinc-100 shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]"
+                  animate={{
+                    x: [-24, 80],
+                  }}
+                  transition={{
+                    duration: 0.8,
+                    repeat: Infinity,
+                    ease: "linear",
+                  }}
+                />
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
