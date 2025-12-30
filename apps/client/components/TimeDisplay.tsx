@@ -26,7 +26,7 @@ export function TimeDisplay({ simulationTime, startDate }: Props) {
             <div className="relative">
               <div className="w-20 h-[2px] rounded-full bg-white/10" />
               <div
-                className="absolute -inset-x-6 -top-5 -bottom-5"
+                className="absolute -inset-x-7 -top-5 -bottom-5"
                 style={{
                   maskImage:
                     "linear-gradient(to right, transparent 20%, black 35%, black 65%, transparent 80%)",
@@ -35,9 +35,9 @@ export function TimeDisplay({ simulationTime, startDate }: Props) {
                 }}
               >
                 <motion.div
-                  className="absolute left-6 top-1/2 -translate-y-1/2 h-[2px] w-6 rounded-full bg-zinc-100 shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] w-6 rounded-full bg-zinc-100 shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]"
                   animate={{
-                    x: [-24, 80],
+                    x: [0, 104],
                   }}
                   transition={{
                     duration: 0.8,
