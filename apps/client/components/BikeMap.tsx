@@ -953,7 +953,7 @@ export const BikeMap = () => {
           <AnimatePresence>
             {selectedTripInfo && (
               <div className="sm:hidden">
-                <SelectedTripPanel info={selectedTripInfo} showEscHint={false} />
+                <SelectedTripPanel info={selectedTripInfo} />
               </div>
             )}
           </AnimatePresence>
