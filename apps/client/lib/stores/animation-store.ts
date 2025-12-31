@@ -1,6 +1,6 @@
-import { create } from "zustand"
-import { DEFAULT_ANIMATION_START_DATE, DEFAULT_SPEEDUP } from "../config"
-import { usePickerStore } from "./location-picker-store"
+import { create } from "zustand";
+import { DEFAULT_ANIMATION_START_DATE, DEFAULT_SPEEDUP } from "../config";
+import { usePickerStore } from "./location-picker-store";
 
 export type SelectedTripInfo = {
   id: string;
@@ -54,7 +54,7 @@ export const useAnimationStore = create<AnimationStore>((set) => ({
   // Playback
   isPlaying: false,
   currentTime: 0,
-  pendingAutoPlay: false,
+  pendingAutoPlay: true, // Auto-play on initial page load
 
   // Loading state
   isLoadingTrips: false,

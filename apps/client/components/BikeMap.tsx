@@ -25,6 +25,7 @@ import { TripsLayer } from "@deck.gl/geo-layers";
 import { IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from "@deck.gl/layers";
 import { DeckGL } from "@deck.gl/react";
 import { Pause, Play, Search, Settings, Shuffle } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap, Marker } from "react-map-gl/mapbox";
@@ -419,46 +420,6 @@ export const BikeMap = () => {
     []
   );
 
-  // Initialize service and load first batch
-  const initialLoadDone = useRef(false);
-  useEffect(() => {
-    if (initialLoadDone.current) return;
-    initialLoadDone.current = true;
-
-    const initService = async () => {
-      useAnimationStore.getState().setIsLoadingTrips(true);
-
-      const service = new TripDataService({
-        windowStartMs,
-        animationStartDate,
-        fadeDurationSimSeconds,
-      });
-
-      serviceRef.current = service;
-
-      // Initialize and get initial trips
-      const initialTrips = await service.init();
-
-      // Copy to local ref
-      tripMapRef.current = initialTrips;
-      for (let i = 0; i <= 2; i++) {
-        loadedChunksRef.current.add(i);
-      }
-      lastBatchRef.current = 0;
-
-      // Update state for initial render
-      setActiveTrips(Array.from(tripMapRef.current.values()));
-      useAnimationStore.getState().setIsLoadingTrips(false);
-    };
-
-    initService();
-
-    // Cleanup on unmount
-    return () => {
-      serviceRef.current?.terminate();
-      serviceRef.current = null;
-    };
-  }, [windowStartMs, animationStartDate, fadeDurationSimSeconds]);
 
   const currentChunk = getChunkIndex(time);
 
@@ -609,40 +570,45 @@ export const BikeMap = () => {
     }
   }, [play, pause, resume]);
 
-  // Reset and reload when config changes (track source values directly)
-  const configRef = useRef({ windowStartMs, speedup });
+  // Initialize service and reload when config changes
+  const configRef = useRef<{ windowStartMs: number; speedup: number } | null>(null);
   useEffect(() => {
     const prev = configRef.current;
-    // Skip if config unchanged (including initial mount)
-    if (prev.windowStartMs === windowStartMs && prev.speedup === speedup) return;
+    const isInitialMount = prev === null;
+
+    // Skip if config unchanged (but always run on initial mount)
+    if (!isInitialMount && prev.windowStartMs === windowStartMs && prev.speedup === speedup) return;
     configRef.current = { windowStartMs, speedup };
 
-    console.log("Config changed, resetting animation...");
+    // Only log and reset state on config changes, not initial mount
+    if (!isInitialMount) {
+      console.log("Config changed, resetting animation...");
 
-    // Stop current animation
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+      // Stop current animation
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      lastTimestampRef.current = null;
+
+      // Clear all state
+      tripMapRef.current.clear();
+      loadingChunksRef.current.clear();
+      loadedChunksRef.current.clear();
+      lastChunkRef.current = -1;
+      lastBatchRef.current = -1;
+      graphSamplerRef.current.reset();
+      fpsSamplerRef.current.reset();
+      setActiveTrips([]);
+      setAnimState("idle");
+      setGraphData([]);
     }
-    lastTimestampRef.current = null;
 
-    // Clear all state
-    tripMapRef.current.clear();
-    loadingChunksRef.current.clear();
-    loadedChunksRef.current.clear();
-    lastChunkRef.current = -1;
-    lastBatchRef.current = -1;
-    graphSamplerRef.current.reset();
-    fpsSamplerRef.current.reset();
-    setActiveTrips([]);
-    setAnimState("idle");
-    setGraphData([]);
-
-    // Recreate service with new config
-    const recreateService = async () => {
+    // Initialize/recreate service
+    const initService = async () => {
       useAnimationStore.getState().setIsLoadingTrips(true);
 
-      // Terminate old service
+      // Terminate old service if exists
       serviceRef.current?.terminate();
 
       // Create new service
@@ -667,7 +633,7 @@ export const BikeMap = () => {
       setActiveTrips(Array.from(tripMapRef.current.values()));
       useAnimationStore.getState().setIsLoadingTrips(false);
 
-      // Auto-play if requested (from TimeDisplay or trip selection)
+      // Auto-play if requested (initial load or time travel)
       const { pendingAutoPlay, clearPendingAutoPlay } = useAnimationStore.getState();
       if (selectedTripId || pendingAutoPlay) {
         play();
@@ -675,7 +641,13 @@ export const BikeMap = () => {
       }
     };
 
-    recreateService();
+    initService();
+
+    // Cleanup on unmount
+    return () => {
+      serviceRef.current?.terminate();
+      serviceRef.current = null;
+    };
   }, [windowStartMs, speedup, fadeDurationSimSeconds, selectedTripId, play, animationStartDate]);
 
   // Select a random visible biker with at least half their trip remaining
@@ -1011,7 +983,9 @@ export const BikeMap = () => {
         {/* Stats - right */}
         <div className="pointer-events-none">
           <ActiveRidesPanel ref={panelRef} graphData={graphData} currentTime={time} bearing={bearing} />
-          {selectedTripInfo && <SelectedTripPanel info={selectedTripInfo} />}
+          <AnimatePresence>
+            {selectedTripInfo && <SelectedTripPanel info={selectedTripInfo} />}
+          </AnimatePresence>
         </div>
       </div>
     </div>
