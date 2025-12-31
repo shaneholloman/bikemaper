@@ -901,7 +901,7 @@ export const BikeMap = () => {
       {/* HUD - top bar */}
       <div className="absolute top-3 inset-x-0 z-10 flex items-start justify-between px-3 pointer-events-none">
         {/* Controls - bottom-right on mobile, top-left on desktop */}
-        <div className="fixed bottom-8 right-3 z-20 sm:static sm:z-auto flex flex-col items-end sm:items-stretch gap-1 pointer-events-auto">
+        <div className="fixed bottom-8 right-3 z-20 sm:static sm:z-auto flex flex-col items-stretch gap-1 pointer-events-auto">
           {/* Search button */}
           <MapControlButton onClick={openSearch}>
             <span className="flex items-center gap-1.5 min-w-20">
@@ -947,15 +947,28 @@ export const BikeMap = () => {
         </div>
 
         {/* Time - absolutely centered */}
-        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-auto">
+        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-auto flex flex-col items-center">
           <TimeDisplay simTimeMs={simTimeMs} realWindowStartDate={animationStartDate} />
+          {/* SelectedTripPanel - mobile only (below time) */}
+          <AnimatePresence>
+            {selectedTripInfo && (
+              <div className="sm:hidden">
+                <SelectedTripPanel info={selectedTripInfo} showEscHint={false} />
+              </div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Stats - right */}
         <div className="pointer-events-none">
           <ActiveRidesPanel ref={panelRef} graphData={graphData} simTimeMs={simTimeMs} bearing={bearing} />
+          {/* SelectedTripPanel - desktop only (right side) */}
           <AnimatePresence>
-            {selectedTripInfo && <SelectedTripPanel info={selectedTripInfo} />}
+            {selectedTripInfo && (
+              <div className="hidden sm:block">
+                <SelectedTripPanel info={selectedTripInfo} />
+              </div>
+            )}
           </AnimatePresence>
         </div>
       </div>

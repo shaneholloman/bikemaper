@@ -7,9 +7,10 @@ import { Kbd } from "./ui/kbd";
 
 type SelectedTripPanelProps = {
   info: SelectedTripInfo;
+  showEscHint?: boolean;
 };
 
-export function SelectedTripPanel({ info }: SelectedTripPanelProps) {
+export function SelectedTripPanel({ info, showEscHint = true }: SelectedTripPanelProps) {
   const isElectric = info.bikeType === "electric_bike";
 
   return (
@@ -57,10 +58,12 @@ export function SelectedTripPanel({ info }: SelectedTripPanelProps) {
       </div>
 
       {/* Footer hint */}
-      <div className="flex items-center gap-1 text-xs text-white/40 mt-2 pt-2 border-t border-white/5">
-        <Kbd>Esc</Kbd>
-        <span>to deselect</span>
-      </div>
+      {showEscHint && (
+        <div className="flex items-center gap-1 text-xs text-white/40 mt-2 pt-2 border-t border-white/5">
+          <Kbd>Esc</Kbd>
+          <span>to deselect</span>
+        </div>
+      )}
     </motion.div>
   );
 }
