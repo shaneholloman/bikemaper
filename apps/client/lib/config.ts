@@ -34,7 +34,7 @@ export const PREFETCH_THRESHOLD_CHUNKS = Math.floor(CHUNKS_PER_BATCH * 0.8);
 // Rendering (visual tuning)
 // =============================================================================
 
-export const SIM_TRAIL_LENGTH_MS = 45 * 1000; // simulation time
+export const SIM_TRAIL_LENGTH_MS = 40.5 * 1000; // simulation time
 export const EASE_DISTANCE_METERS = 300;
 export const EASE_TIME_MULTIPLIER = 2; // How much longer ease zones take vs linear (2 = twice as slow)
 
