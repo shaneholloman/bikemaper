@@ -633,12 +633,8 @@ export const BikeMap = () => {
       setActiveTrips(Array.from(tripMapRef.current.values()));
       useAnimationStore.getState().setIsLoadingTrips(false);
 
-      // Auto-play if requested (initial load or time travel)
-      const { pendingAutoPlay, clearPendingAutoPlay } = useAnimationStore.getState();
-      if (selectedTripId || pendingAutoPlay) {
-        play();
-        clearPendingAutoPlay();
-      }
+      // Auto-play after trips load
+      play();
     };
 
     initService();
@@ -648,7 +644,7 @@ export const BikeMap = () => {
       serviceRef.current?.terminate();
       serviceRef.current = null;
     };
-  }, [windowStartMs, speedup, fadeDurationSimSeconds, selectedTripId, play, animationStartDate]);
+  }, [windowStartMs, speedup, fadeDurationSimSeconds, play, animationStartDate]);
 
   // Select a random visible biker with at least half their trip remaining
   const selectRandomBiker = useCallback(() => {
