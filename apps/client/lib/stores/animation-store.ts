@@ -57,7 +57,7 @@ export const useAnimationStore = create<AnimationStore>((set) => ({
   pendingAutoPlay: true, // Auto-play on initial page load
 
   // Loading state
-  isLoadingTrips: false,
+  isLoadingTrips: true,
 
   // Trip selection
   selectedTripId: null,
