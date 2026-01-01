@@ -1,7 +1,7 @@
 "use client"
 import { EBike } from "@/components/icons/Ebike"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
-import { Kbd } from "@/components/ui/kbd"
+import { EnterHint, Kbd } from "@/components/ui/kbd"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DATA_END_DATE, DATA_START_DATE, REAL_FADE_DURATION_MS } from "@/lib/config"
 import { formatDateTime, formatDateTimeFull, formatDistance, formatDurationMinutes } from "@/lib/format"
@@ -447,11 +447,12 @@ export function Search() {
                   <CommandItem
                     value="parsed-datetime"
                     onSelect={isDateOutOfRange ? undefined : (mode === "ride" ? handleConfirmDatetime : handleJumpToTime)}
-                    className={cn("bg-accent", isDateOutOfRange && "cursor-not-allowed")}
+                    className={cn("group bg-accent", isDateOutOfRange && "cursor-not-allowed")}
                     disabled={isDateOutOfRange}
                   >
                     <ArrowRight className="size-4" />
                     {formatDateTime(parsedDate)}
+                    <EnterHint className="ml-auto" />
                   </CommandItem>
                   {isDateOutOfRange && (
                     <motion.div
@@ -496,9 +497,10 @@ export function Search() {
           {!search.trim() && (
             <>
               <CommandGroup heading="Actions">
-                <CommandItem onSelect={handlePickFromMap}>
+                <CommandItem onSelect={handlePickFromMap} className="group">
                   <MapPin className="size-4" />
                   Pick location from map
+                  <EnterHint className="ml-auto" />
                 </CommandItem>
               </CommandGroup>
               <CommandSeparator />
@@ -516,6 +518,7 @@ export function Search() {
                     <CommandItem
                       value={station.name}
                       onSelect={() => handleSelectStation(station)}
+                      className="group"
                     >
                       <Bike className="size-4" />
                       <div className="flex flex-col flex-1">
@@ -529,6 +532,7 @@ export function Search() {
                           {formatDistance(station.distance)}
                         </span>
                       )}
+                      <EnterHint />
                     </CommandItem>
                   </motion.div>
                 ))}
