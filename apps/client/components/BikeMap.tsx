@@ -28,6 +28,7 @@ import { Info, Pause, Play, Search, Shuffle } from "lucide-react";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { AnimatePresence } from "motion/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap } from "react-map-gl/mapbox";
 import { ActiveRidesPanel } from "./ActiveRidesPanel";
@@ -319,6 +320,7 @@ export const BikeMap = () => {
   const { isPickingLocation, setPickedLocation, pickedLocation } = usePickerStore();
   const { getStation, load: loadStations, stations } = useStationsStore();
   const { open: openSearch, step: searchStep } = useSearchStore();
+  const router = useRouter();
 
   // Detect Mac vs Windows/Linux for keyboard shortcut display
   const [isMac, setIsMac] = useState(true); // Default to Mac to avoid layout shift
@@ -713,13 +715,13 @@ export const BikeMap = () => {
         triggerButtonAnimation(randomButtonRef);
       } else if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        window.location.href = "/about";
+        router.push("/about");
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation]);
+  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation, router]);
 
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
     throw new Error("NEXT_PUBLIC_MAPBOX_TOKEN is not set");
@@ -929,14 +931,14 @@ export const BikeMap = () => {
       {/* HUD - top bar */}
       <div className="absolute top-3 inset-x-0 z-10 flex items-start justify-between px-3 pointer-events-none">
         {/* Controls - bottom-right on mobile, top-left on desktop */}
-        <div className="fixed bottom-8 right-3 z-20 sm:static sm:z-auto flex flex-col items-stretch gap-1 pointer-events-auto">
+        <div className="fixed bottom-4 right-3 z-20 sm:static sm:z-auto grid grid-cols-2 gap-1.5 sm:flex sm:flex-col sm:gap-1 pointer-events-auto">
           {/* Search button */}
           <MapControlButton onClick={openSearch}>
             <span className="flex items-center gap-1.5 min-w-20">
               <Search className="w-4 h-4" />
               Search
             </span>
-            <Kbd className="bg-zinc-800 text-white/70">{isMac ? "⌘" : "Ctrl+"}K</Kbd>
+            <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">{isMac ? "⌘" : "Ctrl+"}K</Kbd>
           </MapControlButton>
           {/* Play/Pause button */}
           {animState === "init" ? (
@@ -945,7 +947,7 @@ export const BikeMap = () => {
                 <Play className="w-4 h-4" />
                 Play
               </span>
-              <Kbd className="bg-zinc-800 text-white/70">Space</Kbd>
+              <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           ) : isPlaying ? (
             <MapControlButton ref={playPauseButtonRef} onClick={pause}>
@@ -953,7 +955,7 @@ export const BikeMap = () => {
                 <Pause className="w-4 h-4" />
                 Pause
               </span>
-              <Kbd className="bg-zinc-800 text-white/70">Space</Kbd>
+              <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           ) : (
             <MapControlButton ref={playPauseButtonRef} onClick={resume}>
@@ -961,7 +963,7 @@ export const BikeMap = () => {
                 <Play className="w-4 h-4" />
                 Play
               </span>
-              <Kbd className="bg-zinc-800 text-white/70">Space</Kbd>
+              <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           )}
           {/* Random button */}
@@ -970,7 +972,7 @@ export const BikeMap = () => {
               <Shuffle className="w-4 h-4" />
               Random
             </span>
-            <Kbd className="bg-zinc-800 text-white/70">R</Kbd>
+            <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">R</Kbd>
           </MapControlButton>
           {/* About button */}
           <Link
@@ -981,7 +983,7 @@ export const BikeMap = () => {
               <Info className="w-4 h-4" />
               About
             </span>
-            <Kbd className="bg-zinc-800 text-white/70">A</Kbd>
+            <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">A</Kbd>
           </Link>
         </div>
 

@@ -4,7 +4,7 @@ import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, C
 import { EnterHint, Kbd } from "@/components/ui/kbd"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DATA_END_DATE, DATA_START_DATE, REAL_FADE_DURATION_MS } from "@/lib/config"
-import { formatDateTime, formatDateTimeFull, formatDistance, formatDurationMinutes } from "@/lib/format"
+import { formatDateTime, formatDateTimeFull, formatDateTimeShort, formatDistance, formatDurationMinutes, formatTimeRange } from "@/lib/format"
 import { useAnimationStore } from "@/lib/stores/animation-store"
 import { usePickerStore } from "@/lib/stores/location-picker-store"
 import { useSearchStore } from "@/lib/stores/search-store"
@@ -404,7 +404,7 @@ export function Search() {
   if (step === "datetime") {
     return (
       <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} shouldFilter={false} className="sm:max-w-xl">
-        <div className="flex items-center px-3 py-2 border-b">
+        <div className="flex items-center px-3 py-2 border-b pr-10">
           <Tabs value={mode} onValueChange={(v) => setMode(v as SearchMode)} >
             <TabsList className="bg-[#1c1c1f]">
               <TabsTrigger value="time" className="data-[state=active]:bg-zinc-800">
@@ -417,7 +417,7 @@ export function Search() {
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <span className="text-xs text-muted-foreground flex items-center gap-1 ml-3">
+          <span className="hidden sm:flex text-xs text-muted-foreground items-center gap-1 ml-3">
               <Kbd>Tab</Kbd> to switch
           </span>
         </div>
@@ -429,8 +429,11 @@ export function Search() {
           onKeyDown={handleDatetimeKeyDown}
           icon={mode === "ride" ? <SearchIcon className="size-4 shrink-0 text-muted-foreground" /> : <CalendarSearch className="size-4 shrink-0 text-muted-foreground" />}
         />
-        <div className="px-3 py-2 text-xs text-zinc-500 flex flex-col gap-0.5">
-          <span>Processed <a href="https://citibikenyc.com/" target="_blank" className="underline hover:text-zinc-50 text-zinc-300 font-medium">Citi Bike</a> data spans June 2013 – December 2025.</span>
+        <div className="px-3 py-2 text-sm sm:text-xs text-zinc-500 flex flex-col gap-0.5">
+          <span>
+            <span className="hidden sm:inline">Processed <a href="https://citibikenyc.com/" target="_blank" className="underline hover:text-zinc-50 text-zinc-300 font-medium">Citi Bike</a> data spans June 2013 – December 2025.</span>
+            <span className="sm:hidden"><a href="https://citibikenyc.com/" target="_blank" className="underline hover:text-zinc-50 text-zinc-300 font-medium">Citi Bike</a> data spans Jun 2013 – Dec 2025</span>
+          </span>
           <span>{'Try "July 4th 2019 at 8pm" or "Fri 4pm"'}</span>
         </div>
         <CommandList className="overflow-hidden">
@@ -451,7 +454,8 @@ export function Search() {
                     disabled={isDateOutOfRange}
                   >
                     <ArrowRight  />
-                    {formatDateTime(parsedDate)}
+                    <span className="hidden sm:inline">{formatDateTime(parsedDate)}</span>
+                    <span className="sm:hidden">{formatDateTimeShort(parsedDate)}</span>
                     <EnterHint className="ml-auto" />
                   </CommandItem>
                   {isDateOutOfRange && (
@@ -476,15 +480,18 @@ export function Search() {
   if (step === "station" && parsedDate) {
     return (
       <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} className="sm:max-w-xl" shouldFilter={false}>
-        <div className="flex items-center gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-2 border-b px-3 py-2 min-w-0 pr-10">
           <button
             onClick={handleBackToDatetime}
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground shrink-0"
           >
             <ArrowLeft className="size-4" />
           </button>
-          <CalendarSearch className="size-4 text-muted-foreground" />
-          <span className="font-medium">{formatDateTime(parsedDate)}</span>
+          <CalendarSearch className="size-4 text-muted-foreground shrink-0" />
+          <span className="font-medium truncate">
+            <span className="hidden sm:inline">{formatDateTime(parsedDate)}</span>
+            <span className="sm:hidden">{formatDateTimeShort(parsedDate)}</span>
+          </span>
         </div>
         <CommandInput
           autoFocus
@@ -547,10 +554,10 @@ export function Search() {
   if (step === "results" && selectedStation) {
     return (
       <CommandDialog open={isOpen} onOpenChange={handleOpenChange} onEscapeKeyDown={handleEscapeKeyDown} className="sm:max-w-xl" shouldFilter={false}>
-        <div className="flex items-center gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-2 border-b px-3 py-2 min-w-0 pr-10">
           <button
             onClick={handleBackToStation}
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground shrink-0"
           >
             <ArrowLeft className="size-4" />
           </button>
@@ -626,14 +633,19 @@ export function Search() {
                                 {trip.bikeType === "electric_bike" ? "E-Bike" : "Bike"} ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
                               </span>
                               <span className="text-sm text-muted-foreground whitespace-nowrap">
-                                {formatDateTimeFull({ startDate: trip.startedAt, endDate: trip.endedAt })}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
+                                <span className="hidden sm:inline">
+                                  {formatDateTimeFull({ startDate: trip.startedAt, endDate: trip.endedAt })}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
+                                </span>
+                                <span className="sm:hidden">
+                                  {formatTimeRange(trip.startedAt, trip.endedAt)}
+                                </span>
                               </span>
                             </div>
                             <div className="ml-auto flex flex-col items-end min-w-0">
                               <span className="text-zinc-100 font-normal truncate max-w-full">
                                 {getStation(trip.endStationName).name}
                               </span>
-                              <span className="text-sm text-muted-foreground">
+                              <span className="text-sm text-muted-foreground truncate max-w-full">
                                 {getStation(trip.endStationName).neighborhood}
                               </span>
                             </div>

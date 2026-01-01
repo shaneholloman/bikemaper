@@ -48,6 +48,19 @@ export function formatDateTime(date: Date): string {
   });
 }
 
+// Format date for display - short version for mobile (NYC timezone)
+export function formatDateTimeShort(date: Date): string {
+  return date.toLocaleString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/New_York",
+  });
+}
+
 // Format date with year always included (NYC timezone)
 // If endDate is provided, shows a time range (e.g., "Jun 1, 2015, 3:30 – 3:52 PM")
 export function formatDateTimeFull(data: { startDate: Date; endDate?: Date }): string {
