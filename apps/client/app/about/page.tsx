@@ -33,19 +33,17 @@ export default function AboutPage() {
 
   return (
     <div className="min-h-dvh bg-background font-mono">
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-      <a
-        href="/"
-        className="fixed top-6 left-6 flex items-center gap-0.5 group"
-      >
-        <ArrowLeft className="size-4 text-white/50 group-hover:text-white transition-colors" />
-        <Kbd className="bg-transparent text-white/50 group-hover:text-white transition-colors">
-          Esc
-        </Kbd>
-      </a>
-
-      {/* Main content - centered with max-width for readability */}
-      <main className="max-w-2xl mx-auto px-6 py-24">
+      <main className="max-w-2xl mx-auto px-6 py-12 md:py-24">
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a
+          href="/"
+          className="flex items-center gap-0.5 group mb-8 md:fixed md:top-6 md:left-6 md:mb-0"
+        >
+          <ArrowLeft className="size-4 text-white/50 group-hover:text-white transition-colors" />
+          <Kbd className="bg-transparent text-white/50 group-hover:text-white transition-colors">
+            Esc
+          </Kbd>
+        </a>
         <h1 className="text-3xl font-semibold text-zinc-100 mb-8">
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a href="/" className="hover:text-white transition-colors">
