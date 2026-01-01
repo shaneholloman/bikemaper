@@ -5,6 +5,7 @@ import {
   CHUNKS_PER_BATCH,
   COLORS,
   INITIAL_VIEW_STATE,
+  NUM_LOOKAHEAD_BATCHES,
   PREFETCH_THRESHOLD_CHUNKS,
   REAL_FADE_DURATION_MS,
   REAL_MAX_FRAME_DELTA_MS,
@@ -440,14 +441,14 @@ export const BikeMap = () => {
     const chunkInBatch = currentChunk % CHUNKS_PER_BATCH;
 
     if (chunkInBatch >= PREFETCH_THRESHOLD_CHUNKS && serviceRef.current) {
-      const nextBatch = currentBatch + 1;
-      serviceRef.current.prefetchBatch(nextBatch);
+      for (let i = 1; i <= NUM_LOOKAHEAD_BATCHES; i++) {
+        serviceRef.current.prefetchBatch(currentBatch + i);
+      }
     }
 
-    // Clear old batch from worker memory (keep current batch and previous)
-    if (currentBatch > 1 && serviceRef.current) {
-      const oldBatch = currentBatch - 2;
-      serviceRef.current.clearBatch(oldBatch);
+    // Clear previous batch from worker memory (already sent to main thread)
+    if (currentBatch > 0 && serviceRef.current) {
+      serviceRef.current.clearBatch(currentBatch - 1);
     }
 
     // Remove trips that have fully finished (including fade-out)

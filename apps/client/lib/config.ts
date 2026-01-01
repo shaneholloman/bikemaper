@@ -27,8 +27,11 @@ export const SIM_BATCH_SIZE_MS = 30 * 60 * 1000; // 30 minutes
 
 export const CHUNKS_PER_BATCH = SIM_BATCH_SIZE_MS / SIM_CHUNK_SIZE_MS;
 
-// Prefetch config - start prefetching next batch at 80% through current batch
-export const PREFETCH_THRESHOLD_CHUNKS = Math.floor(CHUNKS_PER_BATCH * 0.8);
+// Prefetch config - start prefetching next batch at 50% through current batch
+export const PREFETCH_THRESHOLD_CHUNKS = Math.floor(CHUNKS_PER_BATCH * 0.5);
+
+// Number of batches to prefetch ahead (for slow connections / high speedup)
+export const NUM_LOOKAHEAD_BATCHES = 2;
 
 // =============================================================================
 // Rendering (visual tuning)
