@@ -57,8 +57,8 @@ class DuckDBService {
     );
 
     const worker = new Worker(workerUrl);
-    const logger = new duckdb.ConsoleLogger();
-    this.db = new duckdb.AsyncDuckDB(logger, worker);
+    const noopLogger: duckdb.Logger = { log: () => {} };
+    this.db = new duckdb.AsyncDuckDB(noopLogger, worker);
 
     await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
     URL.revokeObjectURL(workerUrl);
