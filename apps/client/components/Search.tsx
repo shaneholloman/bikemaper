@@ -577,7 +577,7 @@ export function Search() {
                                 Bike ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
                               </span>
                               <span className="text-sm text-muted-foreground">
-                                {formatDateTimeFull(trip.startedAt)}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
+                                {formatDateTimeFull({ startDate: trip.startedAt, endDate: trip.endedAt })}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
                               </span>
                             </div>
                             <div className="ml-auto flex flex-col items-end">

@@ -1,21 +1,9 @@
 import { EBike } from "@/components/icons/Ebike";
-import { formatDistance, formatDurationMinutes, formatSpeedMph } from "@/lib/format";
+import { formatDistance, formatDurationMinutes, formatSpeedMph, formatTimeRange } from "@/lib/format";
 import type { SelectedTripInfo } from "@/lib/stores/animation-store";
 import { Bike } from "lucide-react";
 import { motion } from "motion/react";
 import { Kbd } from "./ui/kbd";
-
-function formatTimeRange(startedAt: Date, endedAt: Date): string {
-  const options: Intl.DateTimeFormatOptions = {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "America/New_York",
-  };
-  const start = startedAt.toLocaleTimeString("en-US", options);
-  const end = endedAt.toLocaleTimeString("en-US", options);
-  return `${start} – ${end}`;
-}
 
 type SelectedTripPanelProps = {
   info: SelectedTripInfo;

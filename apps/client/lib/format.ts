@@ -49,16 +49,45 @@ export function formatDateTime(date: Date): string {
 }
 
 // Format date with year always included (NYC timezone)
-export function formatDateTimeFull(date: Date): string {
-  return date.toLocaleString("en-US", {
+// If endDate is provided, shows a time range (e.g., "Jun 1, 2015, 3:30 – 3:52 PM")
+export function formatDateTimeFull(data: { startDate: Date; endDate?: Date }): string {
+  const { startDate, endDate } = data;
+
+  if (!endDate) {
+    return startDate.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/New_York",
+    });
+  }
+
+  // Format as "Jun 1, 2015, 3:30 – 3:52 PM"
+  const datePart = startDate.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "America/New_York",
+  });
+
+  const startTime = startDate.toLocaleString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/New_York",
+  });
+
+  const endTime = endDate.toLocaleString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
     timeZone: "America/New_York",
   });
+
+  return `${datePart}, ${startTime} – ${endTime}`;
 }
 
 // Format milliseconds timestamp (NYC timezone)
@@ -82,6 +111,19 @@ export function formatTimeOnly(ms: number): string {
     hour12: true,
     timeZone: "America/New_York",
   });
+}
+
+// Format a time range (NYC timezone)
+export function formatTimeRange(startedAt: Date, endedAt: Date): string {
+  const options: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/New_York",
+  };
+  const start = startedAt.toLocaleTimeString("en-US", options);
+  const end = endedAt.toLocaleTimeString("en-US", options);
+  return `${start} – ${end}`;
 }
 
 // Format just the date portion (NYC timezone)
