@@ -140,3 +140,9 @@
 .animate-pulse-border {
   animation: pulse-border 2s ease-in-out infinite;
 }
+
+/* Dynamic viewport height for Safari mobile */
+.h-dvh {
+  height: 100vh; /* Fallback for older browsers */
+  height: 100dvh; /* Modern browsers auto-adjust for browser chrome */
+}
