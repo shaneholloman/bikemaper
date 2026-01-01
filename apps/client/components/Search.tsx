@@ -574,7 +574,7 @@ export function Search() {
                             )}
                             <div className="flex flex-col min-w-0">
                               <span className="font-medium">
-                                Bike ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
+                                {trip.bikeType === "electric_bike" ? "E-Bike" : "Bike"} ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
                               </span>
                               <span className="text-sm text-muted-foreground">
                                 {formatDateTimeFull({ startDate: trip.startedAt, endDate: trip.endedAt })}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
