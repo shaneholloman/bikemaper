@@ -27,8 +27,6 @@ import { DeckGL } from "@deck.gl/react";
 import { Info, Pause, Play, Search, Shuffle } from "lucide-react";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { AnimatePresence } from "motion/react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapboxMap } from "react-map-gl/mapbox";
 import { ActiveRidesPanel } from "./ActiveRidesPanel";
@@ -320,7 +318,6 @@ export const BikeMap = () => {
   const { isPickingLocation, setPickedLocation, pickedLocation } = usePickerStore();
   const { getStation, load: loadStations, stations } = useStationsStore();
   const { open: openSearch, step: searchStep } = useSearchStore();
-  const router = useRouter();
 
   // Detect Mac vs Windows/Linux for keyboard shortcut display
   const [isMac, setIsMac] = useState(true); // Default to Mac to avoid layout shift
@@ -715,13 +712,14 @@ export const BikeMap = () => {
         triggerButtonAnimation(randomButtonRef);
       } else if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        router.push("/about");
+        window.location.href = "/about";
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation, router]);
+  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation]);
+
 
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
     throw new Error("NEXT_PUBLIC_MAPBOX_TOKEN is not set");
@@ -974,8 +972,7 @@ export const BikeMap = () => {
             </span>
             <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">R</Kbd>
           </MapControlButton>
-          {/* About button */}
-          <Link
+          <a
             href="/about"
             className="flex items-center justify-between gap-3 bg-black/45 hover:bg-black/55 hover:scale-[1.02] active:scale-95 text-white/90 text-sm font-medium pl-2.5 pr-2.5 py-2 sm:pl-2 sm:pr-2 sm:py-1.5 rounded-full border border-white/10 backdrop-blur-md transition-all duration-200 ease-out shadow-[0_0_20px_rgba(0,0,0,0.6)] hover:duration-100 active:duration-200 outline-none"
           >
@@ -984,7 +981,7 @@ export const BikeMap = () => {
               About
             </span>
             <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">A</Kbd>
-          </Link>
+          </a>
         </div>
 
         {/* Time - absolutely centered */}
