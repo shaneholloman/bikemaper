@@ -16,7 +16,7 @@ import distance from "@turf/distance"
 import { point } from "@turf/helpers"
 import * as chrono from "chrono-node"
 import { Fzf } from "fzf"
-import { ArrowLeft, ArrowRight, Bike, CalendarSearch, Loader2, MapPin, Search as SearchIcon } from "lucide-react"
+import { ArrowLeft, ArrowRight, Bike, CalendarSearch, History, Loader2, MapPin, Search as SearchIcon } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import React from "react"
 
@@ -408,7 +408,7 @@ export function Search() {
           <Tabs value={mode} onValueChange={(v) => setMode(v as SearchMode)} >
             <TabsList className="bg-[#1c1c1f]">
               <TabsTrigger value="time" className="data-[state=active]:bg-zinc-800">
-                <CalendarSearch className="size-3.5" />
+                <History className="size-3.5" />
                 Time travel
               </TabsTrigger>
               <TabsTrigger value="ride" className="data-[state=active]:bg-zinc-800">
@@ -621,16 +621,16 @@ export function Search() {
                             ) : (
                               <Bike className="size-8 text-[#BB9AF7] shrink-0" />
                             )}
-                            <div className="flex flex-col min-w-0">
-                              <span className="font-medium">
+                            <div className="flex flex-col shrink-0 pr-4">
+                              <span className="font-medium whitespace-nowrap">
                                 {trip.bikeType === "electric_bike" ? "E-Bike" : "Bike"} ride · {formatDurationMinutes(trip.startedAt, trip.endedAt)}
                               </span>
-                              <span className="text-sm text-muted-foreground">
+                              <span className="text-sm text-muted-foreground whitespace-nowrap">
                                 {formatDateTimeFull({ startDate: trip.startedAt, endDate: trip.endedAt })}{trip.routeDistance && ` · ${formatDistance(trip.routeDistance)}`}
                               </span>
                             </div>
-                            <div className="ml-auto flex flex-col items-end">
-                              <span className="text-zinc-100 font-normal truncate max-w-[30ch]">
+                            <div className="ml-auto flex flex-col items-end min-w-0">
+                              <span className="text-zinc-100 font-normal truncate max-w-full">
                                 {getStation(trip.endStationName).name}
                               </span>
                               <span className="text-sm text-muted-foreground">
