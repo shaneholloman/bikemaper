@@ -119,11 +119,11 @@ export default function AboutPage() {
             </li>
             <li>
               <span className="font-medium text-zinc-300">Worker threads</span> —
-              Heavy precomputation is done on Web Workers to move the CPU load from the JS main thread.
+              Heavy precomputation is done on Web Workers to offload CPU load from the JS main thread.
             </li>
             <li>
               <span className="font-medium text-zinc-300">Continuous streaming</span> —
-              Trip data loads incrementally and invisibly in {SIM_BATCH_SIZE_MS / 60000}-minute batches.
+              Trips load incrementally and invisibly in {SIM_BATCH_SIZE_MS / 60000}-minute batches.
             </li>
           </ul>
 
