@@ -77,7 +77,7 @@ export default function AboutPage() {
           </p>
 
           <p>
-            If you have ever used Citi Bike before, your ride is likely here. Use your Citi Bike receipt to search for and find your ride.
+            If you have ever used Citi Bike, your ride is likely here. Use your Citi Bike receipt to search for and find your ride.
           </p>
 
           <hr className="border-white/10" />
@@ -109,7 +109,7 @@ export default function AboutPage() {
           <h2 className="text-lg font-medium text-white">Why</h2>
 
           <p>
-            {"There is no economic value for this project except that I think it is cool and beautiful :)"}
+            {"There is no economic use for this project except that I think it is cool and beautiful :)"}
           </p>
 
           <p>
@@ -120,13 +120,12 @@ export default function AboutPage() {
               className="inline-flex items-center gap-1 text-zinc-300 font-medium hover:text-zinc-100 border-b border-current pb-0.5"
             >
               <Github className="size-4" />
-              bikemap.nyc
+              freeman-jiang/bikemap.nyc
             </a>.
           </p>
 
           <p>
-            This project is free to use, but I am paying for Mapbox and hosting
-            costs out of pocket. If you&apos;d like to support me, please consider{" "}
+             {"I want to keep this project free to use, but I am paying for Mapbox and hosting costs out of pocket. If you'd like to support me, please consider "}
             <a
               href="https://buymeacoffee.com/freemanjiang"
              
