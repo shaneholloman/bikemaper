@@ -110,10 +110,10 @@ Station names changed over time (e.g., "8 Ave & W 31 St" → "W 31 St & 8 Ave").
 
 | Schema | Years | Detection | Route Matching |
 |--------|-------|-----------|----------------|
-| Legacy | 2013-2019 | Has `tripduration` column | Coordinate snap → nearest station name |
+| Legacy | 2013-2019 | Has `tripduration` column | CSV name → canonical name via alias lookup |
 | Modern | 2020+ | Has `ride_id` column | CSV name → canonical name via alias lookup |
 
-**Legacy coordinate matching:** Trip coordinates are matched to the nearest current station within 200m, giving ~98% route coverage despite old station names/IDs.
+Both schemas use the same alias-based route matching. The difference is in CSV column names and data formats (e.g., `starttime` vs `started_at`, `Subscriber` vs `member`).
 
 ### DuckDB CSV Options
 
@@ -167,7 +167,4 @@ read_csv_auto('path/**/*.csv',
 
 Trips without routes (round trips, ferry crossings) are filtered out at build time, so the parquet files contain only trips with valid route geometry.
 
-| Year | Notes |
-|------|-------|
-| 2013-2019 | Coordinate-based matching to nearest station |
-| 2020+ | Name-based matching with alias normalization |
+Both legacy (2013-2019) and modern (2020+) data use alias-based name matching. The 60m station clustering in `build-stations.ts` captures historical station name variations, enabling high route coverage across all years.
