@@ -1,6 +1,6 @@
 # bikemap.nyc
 
-GPU-accelerated visualization of [Citi Bike](https://citibikenyc.com), the largest bike-sharing system in the US.
+[bikemap.nyc](https://bikemap.nyc) is a GPU-accelerated visualization of [Citi Bike](https://citibikenyc.com), the largest bike-sharing system in the US.
 
 [vid]
 
@@ -56,3 +56,9 @@ bun dev
 ```
 
 See the [processing README](packages/processing/README.md) for instructions on how to run the data pipeline.
+
+## Why
+
+There is no economic value for this project except that I think it is cool and beautiful :)
+
+I hope to keep this project free to use, but I am paying for Mapbox and hosting costs out of pocket. If you'd like to support me, please consider [buying me a coffee](https://buymeacoffee.com/freemanjiang)!
