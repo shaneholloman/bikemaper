@@ -86,8 +86,7 @@ export default function AboutPage() {
 
           <p>
             The data only contains the start and end station for each trip, but
-            does not contain the exact route. Thus,
-             route geometries are computed using the shortest path from{" "}
+            does not contain the full path. Route geometries are computed for each (start station, end station) pair using the shortest path from{" "}
             <a
               href="https://project-osrm.org/"
              
@@ -99,7 +98,7 @@ export default function AboutPage() {
           </p>
 
           <p>
-            This means that the calculated routes are directionally correct
+            This means that the computed routes are directionally correct
             but inexact. Trips that start and end at the same station are
             filtered out since the route geometry is ambiguous.
           </p>
