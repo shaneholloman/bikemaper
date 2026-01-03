@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://bikemap.nyc"),
   title: "bikemap.nyc",
   description:
     "Visualization of the entire history of Citi Bike, the largest bike-sharing system in the US.",
