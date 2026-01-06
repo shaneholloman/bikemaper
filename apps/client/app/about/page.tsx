@@ -2,6 +2,7 @@
 
 import { Kbd } from "@/components/ui/kbd";
 import { COLORS, DEFAULT_SPEEDUP, SIM_BATCH_SIZE_MS } from "@/lib/config";
+import { cn } from "@/lib/utils";
 import { ArrowLeft, Coffee, Github } from "lucide-react";
 import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
@@ -67,12 +68,11 @@ const LegendItem = ({ color, label, showTrailOnHover = true, glowIntensity = "no
       onMouseLeave={() => setIsHovered(false)}
     >
       <span
-        className="transition-[filter] duration-200"
-        style={{
-          filter: isHovered ? glowFilter : "none",
-          transform: "translateZ(0)",
-          willChange: "filter",
-        }}
+        className={cn(
+          "transition-[filter] duration-200 transform-gpu",
+          isHovered ? "[will-change:filter]" : ""
+        )}
+        style={{ filter: isHovered ? glowFilter : "none" }}
       >
         <ArrowIcon color={color} showTrail={showTrailOnHover && isHovered} />
       </span>
