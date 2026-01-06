@@ -7,6 +7,7 @@ import {
   INITIAL_VIEW_STATE,
   NUM_LOOKAHEAD_BATCHES,
   PREFETCH_THRESHOLD_CHUNKS,
+  REAL_COLOR_TRANSITION_MS,
   REAL_FADE_DURATION_MS,
   REAL_MAX_FRAME_DELTA_MS,
   SIM_CHUNK_SIZE_MS,
@@ -161,7 +162,7 @@ function updateTripState(
     trip.currentPhase = phase;
     trip.currentPhaseProgress = phaseProgress;
     trip.isVisible = true;
-    computeTripColors(trip, viewerFadeProgress);
+    computeTripColors(trip, viewerFadeProgress, 0, 1); // movingTimeMs and colorTransitionMs unused in fading-in
     return true;
   }
 
@@ -172,7 +173,7 @@ function updateTripState(
     trip.currentPhase = phase;
     trip.currentPhaseProgress = phaseProgress;
     trip.isVisible = true;
-    computeTripColors(trip, viewerFadeProgress);
+    computeTripColors(trip, viewerFadeProgress, 0, 1); // movingTimeMs and colorTransitionMs unused in fading-out
     return true;
   }
 
@@ -238,13 +239,17 @@ function updateTripState(
   trip.currentPhase = phase;
   trip.currentPhaseProgress = phaseProgress;
   trip.isVisible = true;
-  computeTripColors(trip, viewerFadeProgress);
+  const movingTimeMs = simTimeMs - simFadeInEndMs;
+  const colorTransitionMs = REAL_COLOR_TRANSITION_MS * (realFadeDurationMs / REAL_FADE_DURATION_MS); // scale with speedup
+  computeTripColors(trip, viewerFadeProgress, movingTimeMs, colorTransitionMs);
 
   return true;
 }
 
 // Compute colors in-place based on current phase, progress, and viewer fade
-function computeTripColors(trip: ProcessedTrip, viewerFadeProgress: number): void {
+// movingTimeMs: time since movement started (for color transition during moving phase)
+// colorTransitionMs: duration for color transition (green -> bike color)
+function computeTripColors(trip: ProcessedTrip, viewerFadeProgress: number, movingTimeMs: number, colorTransitionMs: number): void {
   const bikeColor = trip.bikeType === "electric_bike" ? COLORS.electric : COLORS.classic;
   const phase = trip.currentPhase;
   const progress = trip.currentPhaseProgress;
@@ -254,29 +259,42 @@ function computeTripColors(trip: ProcessedTrip, viewerFadeProgress: number): voi
 
   switch (phase) {
     case "fading-in":
-      // Lerp from fadeIn to bikeColor
-      r = COLORS.fadeIn[0] + (bikeColor[0] - COLORS.fadeIn[0]) * progress;
-      g = COLORS.fadeIn[1] + (bikeColor[1] - COLORS.fadeIn[1]) * progress;
-      b = COLORS.fadeIn[2] + (bikeColor[2] - COLORS.fadeIn[2]) * progress;
+      // Fade in to 100% green
+      r = COLORS.fadeIn[0];
+      g = COLORS.fadeIn[1];
+      b = COLORS.fadeIn[2];
       headAlpha = progress * MAX_ALPHA;
       pathAlpha = progress * PATH_OPACITY;
       break;
-    case "fading-out":
-      r = COLORS.fadeOut[0];
-      g = COLORS.fadeOut[1];
-      b = COLORS.fadeOut[2];
+    case "fading-out": {
+      // First 25%: bike color -> red, then stay red
+      const colorTransitionEnd = 0.25;
+      if (progress < colorTransitionEnd) {
+        const colorProgress = progress / colorTransitionEnd;
+        r = bikeColor[0] + (COLORS.fadeOut[0] - bikeColor[0]) * colorProgress;
+        g = bikeColor[1] + (COLORS.fadeOut[1] - bikeColor[1]) * colorProgress;
+        b = bikeColor[2] + (COLORS.fadeOut[2] - bikeColor[2]) * colorProgress;
+      } else {
+        r = COLORS.fadeOut[0];
+        g = COLORS.fadeOut[1];
+        b = COLORS.fadeOut[2];
+      }
       headAlpha = (1 - progress) * MAX_ALPHA;
       pathAlpha = (1 - progress) * PATH_OPACITY;
       break;
-    default: // moving
-      r = bikeColor[0];
-      g = bikeColor[1];
-      b = bikeColor[2];
+    }
+    default: {
+      // Moving: transition from green to bike color
+      const colorProgress = Math.min(1, movingTimeMs / colorTransitionMs);
+      r = COLORS.fadeIn[0] + (bikeColor[0] - COLORS.fadeIn[0]) * colorProgress;
+      g = COLORS.fadeIn[1] + (bikeColor[1] - COLORS.fadeIn[1]) * colorProgress;
+      b = COLORS.fadeIn[2] + (bikeColor[2] - COLORS.fadeIn[2]) * colorProgress;
       headAlpha = MAX_ALPHA;
       pathAlpha = PATH_OPACITY;
+    }
   }
 
-  // Apply viewer fade as final alpha multiplier (orthogonal to timeline phases)
+  // Head and path always match
   trip.currentHeadColor[0] = r;
   trip.currentHeadColor[1] = g;
   trip.currentHeadColor[2] = b;
