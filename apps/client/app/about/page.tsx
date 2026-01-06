@@ -153,7 +153,7 @@ export default function AboutPage() {
           </p>
 
           <p>
-            If you have ever used Citi Bike, you are part of the art. Use your Citi Bike receipt to find your trip.
+            If you have ever used Citi Bike, you are part of the art. Use your Citi Bike receipt to find your ride.
           </p>
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
