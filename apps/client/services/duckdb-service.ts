@@ -154,8 +154,8 @@ class DuckDBService {
     const { chunkStart, chunkEnd } = params;
 
     // For overlap queries, we need files that could contain trips starting before chunkEnd
-    // Since trips can be long, we look back further (e.g., a trip could start in previous month)
-    const lookbackStart = new Date(chunkStart.getTime() - 24 * 60 * 60 * 1000); // 1 day lookback
+    // 90 min lookback covers 99.92% of trips (P99.9 is 85 min with speed filters applied)
+    const lookbackStart = new Date(chunkStart.getTime() - 90 * 60 * 1000); // 90 min lookback
     const months = getMonthsForRange(lookbackStart, chunkEnd);
     await this.registerMonthlyFiles(months);
 

@@ -73,7 +73,7 @@ export function TimeDisplay({ simTimeMs, realWindowStartDate }: Props) {
                     exit="hidden"
                     variants={{
                       hidden: {},
-                      visible: { transition: { staggerChildren: 0.5 } },
+                      visible: { transition: { staggerChildren: 0.15 } },
                     }}
                     className="absolute inset-0"
                   >
