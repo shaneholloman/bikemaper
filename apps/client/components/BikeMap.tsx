@@ -317,6 +317,7 @@ export const BikeMap = () => {
   const storePlay = useAnimationStore((s) => s.play);
   const storePause = useAnimationStore((s) => s.pause);
   const isPlaying = useAnimationStore((s) => s.isPlaying);
+  const isLoadingTrips = useAnimationStore((s) => s.isLoadingTrips);
   const advanceSimTime = useAnimationStore((s) => s.advanceSimTime);
   const setSimCurrentTimeMs = useAnimationStore((s) => s.setSimCurrentTimeMs);
   const selectedTripId = useAnimationStore((s) => s.selectedTripId);
@@ -741,6 +742,8 @@ export const BikeMap = () => {
 
       if (e.key === " " && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
+        // Block play/resume while loading, but always allow pause
+        if (isLoadingTrips && !isPlayingRef.current) return;
         togglePlayPause();
         triggerButtonAnimation(playPauseButtonRef);
       } else if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
@@ -758,7 +761,7 @@ export const BikeMap = () => {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation, toggleHud]);
+  }, [togglePlayPause, selectRandomBiker, triggerButtonAnimation, toggleHud, isLoadingTrips]);
 
 
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
@@ -998,7 +1001,7 @@ export const BikeMap = () => {
           </MapControlButton>
           {/* Play/Pause button */}
           {animState === "init" ? (
-            <MapControlButton ref={playPauseButtonRef} onClick={play}>
+            <MapControlButton ref={playPauseButtonRef} onClick={play} disabled={isLoadingTrips}>
               <span className="flex items-center gap-1.5">
                 <Play className="w-4 h-4" />
                 Play
@@ -1014,7 +1017,7 @@ export const BikeMap = () => {
               <Kbd className="hidden sm:inline-flex bg-zinc-800 text-white/70">Space</Kbd>
             </MapControlButton>
           ) : (
-            <MapControlButton ref={playPauseButtonRef} onClick={resume}>
+            <MapControlButton ref={playPauseButtonRef} onClick={resume} disabled={isLoadingTrips}>
               <span className="flex items-center gap-1.5">
                 <Play className="w-4 h-4" />
                 Play
