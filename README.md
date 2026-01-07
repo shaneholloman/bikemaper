@@ -7,10 +7,11 @@ https://github.com/user-attachments/assets/1c28daaf-f6eb-4121-9e92-a59daa53e73c
 Each moving arrow represents a real bike ride, based on anonymized [historical system data](https://citibikenyc.com/system-data) published by Lyft.
 
 ## Features
+- GPU-accelerated rendering of thousands of concurrent rides
 - Natural language date parsing to jump to any moment in history
 - Search for individual rides by date and station name
 - Full keyboard controls for playback and navigation
-- Coverage of more than 291.2 million trips from 2013 to 2025 with 0.7% data loss (mainly from malformed entries)
+- Coverage of more than 291.2 million trips from 2013 to 2025 (0.7% data loss)
 
 ## How it works 
 
