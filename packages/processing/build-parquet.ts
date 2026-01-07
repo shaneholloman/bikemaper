@@ -11,7 +11,7 @@
 // - apps/client/public/stations.json (from build-stations.ts)
 //
 // Output:
-// - output/parquets/<year>-<month>.parquet for each month with data
+// - output/parquets/<year>-<month>-<day>.parquet for each day with data
 import { DuckDBConnection } from "@duckdb/node-api";
 import { globSync } from "glob";
 import { mkdir, rm, stat } from "node:fs/promises";
@@ -178,26 +178,26 @@ async function main() {
   const loadTime = Date.now() - startTime;
   console.log(`Loaded CSVs into temp table in ${(loadTime / 1000).toFixed(1)}s`);
 
-  // Pre-compute output month for efficient filtering
-  // This avoids re-computing timezone conversion + string formatting for every row on every month iteration
-  console.log("\nPre-computing output months...");
+  // Pre-compute output day for efficient filtering
+  // This avoids re-computing timezone conversion + string formatting for every row on every day iteration
+  console.log("\nPre-computing output days...");
   const precomputeStart = Date.now();
   await connection.run(`
-    ALTER TABLE raw ADD COLUMN output_month VARCHAR
+    ALTER TABLE raw ADD COLUMN output_day VARCHAR
   `);
   await connection.run(`
-    UPDATE raw SET output_month = strftime(
+    UPDATE raw SET output_day = strftime(
       timezone('America/New_York', started_at)::TIMESTAMP,
-      '%Y-%m'
+      '%Y-%m-%d'
     )
     WHERE started_at IS NOT NULL
   `);
-  console.log("Creating index on output_month...");
+  console.log("Creating index on output_day...");
   await connection.run(`
-    CREATE INDEX idx_output_month ON raw(output_month)
+    CREATE INDEX idx_output_day ON raw(output_day)
   `);
   const precomputeTime = Date.now() - precomputeStart;
-  console.log(`Pre-computed output months in ${(precomputeTime / 1000).toFixed(1)}s`);
+  console.log(`Pre-computed output days in ${(precomputeTime / 1000).toFixed(1)}s`);
 
   // 2. Validate data
   console.log("\nValidating data...");
@@ -323,42 +323,42 @@ async function main() {
     AND end_lng BETWEEN ${NYC_BOUNDS.minLng} AND ${NYC_BOUNDS.maxLng}
   `;
 
-  // Get distinct output months (uses pre-computed column)
-  const monthsResult = await connection.runAndReadAll(`
-    SELECT DISTINCT output_month as month
+  // Get distinct output days (uses pre-computed column)
+  const daysResult = await connection.runAndReadAll(`
+    SELECT DISTINCT output_day as day
     FROM raw
-    WHERE output_month IS NOT NULL
-    ORDER BY month
+    WHERE output_day IS NOT NULL
+    ORDER BY day
   `);
-  const months = monthsResult.getRowObjects() as Array<{ month: string }>;
-  console.log(`\nFound ${months.length} months to process: ${months[0]?.month} to ${months[months.length - 1]?.month}`);
+  const days = daysResult.getRowObjects() as Array<{ day: string }>;
+  console.log(`\nFound ${days.length} days to process: ${days[0]?.day} to ${days[days.length - 1]?.day}`);
 
   let totalTripCount = 0;
   let totalWithRoute = 0;
   let totalParquetBytes = 0;
 
-  for (let i = 0; i < months.length; i++) {
-    const month = months[i]!.month;
-    console.log(`\n[${i + 1}/${months.length}] Processing ${month}...`);
+  for (let i = 0; i < days.length; i++) {
+    const day = days[i]!.day;
+    console.log(`\n[${i + 1}/${days.length}] Processing ${day}...`);
     const stepStart = Date.now();
 
-    // Filter valid rows for this output month (uses pre-computed index)
+    // Filter valid rows for this output day (uses pre-computed index)
     await connection.run(`
-      CREATE TABLE filtered_month AS
+      CREATE TABLE filtered_day AS
       SELECT * FROM raw
       WHERE ${validRowFilter}
-        AND output_month = '${month}'
+        AND output_day = '${day}'
     `);
 
     // Deduplicate by ride_id
     await connection.run(`
-      CREATE TABLE deduped_month AS
-      SELECT DISTINCT ON (ride_id) * FROM filtered_month
+      CREATE TABLE deduped_day AS
+      SELECT DISTINCT ON (ride_id) * FROM filtered_day
     `);
 
     // JOIN with routes
     await connection.run(`
-      CREATE TABLE joined_month AS
+      CREATE TABLE joined_day AS
       SELECT
         t.ride_id as id,
         COALESCE(snl_start.canonical_name, t.start_station_name) as startStationName,
@@ -373,7 +373,7 @@ async function main() {
         t.end_lng as endLng,
         r.geometry as routeGeometry,
         r.distance as routeDistance
-      FROM deduped_month t
+      FROM deduped_day t
       LEFT JOIN station_name_lookup snl_start
         ON t.start_station_name = snl_start.any_name
       LEFT JOIN station_name_lookup snl_end
@@ -383,35 +383,35 @@ async function main() {
         AND r.end_station_name = COALESCE(snl_end.canonical_name, t.end_station_name)
     `);
 
-    // Get stats for this month
+    // Get stats for this day
     const statsReader = await connection.runAndReadAll(`
-      SELECT COUNT(*) as total, COUNT(routeGeometry) as with_route FROM joined_month
+      SELECT COUNT(*) as total, COUNT(routeGeometry) as with_route FROM joined_day
     `);
     const stats = statsReader.getRowObjects()[0] as { total: bigint; with_route: bigint };
-    const monthTripCount = Number(stats.total);
-    const monthWithRoute = Number(stats.with_route);
-    totalTripCount += monthTripCount;
-    totalWithRoute += monthWithRoute;
+    const dayTripCount = Number(stats.total);
+    const dayWithRoute = Number(stats.with_route);
+    totalTripCount += dayTripCount;
+    totalWithRoute += dayWithRoute;
 
     // Export to parquet (only trips with routes - round trips and ferry crossings are excluded)
     // ROW_GROUP_SIZE 2048 (DuckDB minimum) enables efficient time-range queries via predicate pushdown.
     // Very important to not use the default of 122,880 rows (this means we have to fetch the row group for 122k trips just to get our 30m chunk!)
-    const monthPath = path.join(outputDir, `parquets/${month}.parquet`);
+    const dayPath = path.join(outputDir, `parquets/${day}.parquet`);
     await connection.run(`
-      COPY (SELECT * FROM joined_month WHERE routeGeometry IS NOT NULL ORDER BY startedAt)
-      TO '${monthPath}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 2048)
+      COPY (SELECT * FROM joined_day WHERE routeGeometry IS NOT NULL ORDER BY startedAt)
+      TO '${dayPath}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 2048)
     `);
 
-    const monthStats = await stat(monthPath);
-    totalParquetBytes += monthStats.size;
+    const dayStats = await stat(dayPath);
+    totalParquetBytes += dayStats.size;
     const elapsed = ((Date.now() - stepStart) / 1000).toFixed(1);
-    console.log(`  ${monthTripCount} trips (${monthWithRoute} with routes) → ${(monthStats.size / 1024 / 1024).toFixed(1)} MB in ${elapsed}s`);
-    console.log(`  → ${monthPath}`);
+    console.log(`  ${dayTripCount} trips (${dayWithRoute} with routes) → ${(dayStats.size / 1024 / 1024).toFixed(1)} MB in ${elapsed}s`);
+    console.log(`  → ${dayPath}`);
 
-    // Clean up month tables before next iteration
-    await connection.run(`DROP TABLE filtered_month`);
-    await connection.run(`DROP TABLE deduped_month`);
-    await connection.run(`DROP TABLE joined_month`);
+    // Clean up day tables before next iteration
+    await connection.run(`DROP TABLE filtered_day`);
+    await connection.run(`DROP TABLE deduped_day`);
+    await connection.run(`DROP TABLE joined_day`);
   }
 
   // Final summary

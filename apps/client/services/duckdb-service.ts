@@ -5,34 +5,34 @@ import * as duckdb from "@duckdb/duckdb-wasm";
 const TRIPS_BASE_URL = "https://cdn.bikemap.nyc";
 
 /**
- * Get month key from a date (e.g., "2025-09")
+ * Get day key from a date (e.g., "2025-09-15")
  * Uses UTC to match parquet file naming convention
  */
-function getMonthKey(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+function getDayKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 // Valid data range boundaries (derived from config)
-const DATA_START_MONTH = getMonthKey(DATA_START_DATE);
-const DATA_END_MONTH = getMonthKey(DATA_END_DATE);
+const DATA_START_DAY = getDayKey(DATA_START_DATE);
+const DATA_END_DAY = getDayKey(DATA_END_DATE);
 
 /**
- * Get the list of months that overlap with a date range
+ * Get the list of days that overlap with a date range
  * Uses UTC to match parquet file naming convention
- * Filters to only include months within the valid data range
+ * Filters to only include days within the valid data range
  */
-function getMonthsForRange(from: Date, to: Date): string[] {
-  const months: string[] = [];
-  const current = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+function getDaysForRange(from: Date, to: Date): string[] {
+  const days: string[] = [];
+  const current = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
 
   while (current <= end) {
-    months.push(getMonthKey(current));
-    current.setUTCMonth(current.getUTCMonth() + 1);
+    days.push(getDayKey(current));
+    current.setUTCDate(current.getUTCDate() + 1);
   }
 
   // Filter to valid data range (prevents loading non-existent parquet files)
-  return months.filter((m) => m >= DATA_START_MONTH && m <= DATA_END_MONTH);
+  return days.filter((d) => d >= DATA_START_DAY && d <= DATA_END_DAY);
 }
 
 /**
@@ -94,12 +94,12 @@ class DuckDBService {
   }
 
   /**
-   * Register monthly parquet files for a date range
+   * Register daily parquet files for a date range
    */
-  private async registerMonthlyFiles(months: string[]): Promise<void> {
+  private async registerDailyFiles(days: string[]): Promise<void> {
     const { db } = this.ensureInitialized();
-    for (const month of months) {
-      const filename = `${month}.parquet`;
+    for (const day of days) {
+      const filename = `${day}.parquet`;
       const url = `${TRIPS_BASE_URL}/parquets/${filename}`;
       await db.registerFileURL(filename, url, duckdb.DuckDBDataProtocol.HTTP, false);
     }
@@ -112,11 +112,11 @@ class DuckDBService {
     const { conn } = this.ensureInitialized();
     const { from, to } = params;
 
-    const months = getMonthsForRange(from, to);
-    await this.registerMonthlyFiles(months);
+    const days = getDaysForRange(from, to);
+    await this.registerDailyFiles(days);
 
-    const files = months.map((m) => `'${m}.parquet'`).join(", ");
-    console.log(`[DuckDB] getTripsInRange: ${from.toISOString()} to ${to.toISOString()} (files: ${months.join(", ")})`);
+    const files = days.map((d) => `'${d}.parquet'`).join(", ");
+    console.log(`[DuckDB] getTripsInRange: ${from.toISOString()} to ${to.toISOString()} (files: ${days.length} days)`);
     const startTime = Date.now();
 
     const result = await conn.query(`
@@ -156,11 +156,11 @@ class DuckDBService {
     // For overlap queries, we need files that could contain trips starting before chunkEnd
     // 90 min lookback covers 99.92% of trips (P99.9 is 85 min with speed filters applied)
     const lookbackStart = new Date(chunkStart.getTime() - 90 * 60 * 1000); // 90 min lookback
-    const months = getMonthsForRange(lookbackStart, chunkEnd);
-    await this.registerMonthlyFiles(months);
+    const days = getDaysForRange(lookbackStart, chunkEnd);
+    await this.registerDailyFiles(days);
 
-    const files = months.map((m) => `'${m}.parquet'`).join(", ");
-    console.log(`[DuckDB] getTripsOverlap: ${chunkStart.toISOString()} to ${chunkEnd.toISOString()} (files: ${months.join(", ")})`);
+    const files = days.map((d) => `'${d}.parquet'`).join(", ");
+    console.log(`[DuckDB] getTripsOverlap: ${chunkStart.toISOString()} to ${chunkEnd.toISOString()} (files: ${days.length} days)`);
     const startTime = Date.now();
 
     const result = await conn.query(`
@@ -204,10 +204,10 @@ class DuckDBService {
     const windowStart = new Date(datetime.getTime() - intervalMs);
     const windowEnd = new Date(datetime.getTime() + intervalMs);
 
-    const months = getMonthsForRange(windowStart, windowEnd);
-    await this.registerMonthlyFiles(months);
+    const days = getDaysForRange(windowStart, windowEnd);
+    await this.registerDailyFiles(days);
 
-    const files = months.map((m) => `'${m}.parquet'`).join(", ");
+    const files = days.map((d) => `'${d}.parquet'`).join(", ");
 
     // Escape single quotes in station name
     const escapedName = startStationName.replace(/'/g, "''");

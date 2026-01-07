@@ -52,7 +52,7 @@ Quick summary:
 ```
 CSV files (all years) → build-stations.ts → stations.json
 CSV files (all years) → build-routes.ts   → routes.db
-CSV files (all years) → build-parquet.ts  → parquet files (per month)
+CSV files (all years) → build-parquet.ts  → parquet files (per day)
 ```
 
 ## Scripts
@@ -86,7 +86,7 @@ bun run build-parquet.ts
 |------|-------------|
 | `apps/client/public/stations.json` | Station index with aliases, coordinates, borough/neighborhood |
 | `output/routes.db` | SQLite cache of routes keyed by station NAME |
-| `output/parquets/<year>-<month>.parquet` | Monthly trip data with embedded route geometry |
+| `output/parquets/<year>-<month>-<day>.parquet` | Daily trip data with embedded route geometry |
 
 ## Upload to Cloud Storage
 
@@ -166,7 +166,7 @@ read_csv_auto('path/**/*.csv',
 |-------|----------|-------|
 | CSV (raw) | NYC local (naive) | No timezone info in source data |
 | Parquet | UTC | Build converts NYC → UTC |
-| Parquet filenames | UTC month | `2025-09.parquet` uses UTC month boundaries |
+| Parquet filenames | UTC day | `2025-09-15.parquet` uses UTC day boundaries |
 | Client internal | UTC | Use `getUTCMonth()`, `Date.UTC()`, etc. |
 | Client display | NYC | `timeZone: "America/New_York"` in formatters |
 
