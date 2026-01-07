@@ -22,7 +22,7 @@ The [raw system data](https://citibikenyc.com/system-data) spans 12 years and ha
 
 1. **Station clustering**: Creates a list of all unique station names and their coordinates.
 2. **Route generation**: Queries [OSRM](https://project-osrm.org/) for bike routes between all station pairs. Geometries are cached per pair and stored as polyline6 in an intermediate SQLite database.
-3. **Parquet export**: Generates a parquet file for each month by joining each trip with its corresponding route geometry.
+3. **Parquet export**: Generates a parquet file for each day by joining each trip with its corresponding route geometry.
 
 ### 2) Client application
 
